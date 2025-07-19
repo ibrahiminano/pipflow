@@ -8,7 +8,7 @@ PIPFLOW AI is a revolutionary iOS trading platform that democratizes professiona
 ### Technology Stack
 - **Frontend**: SwiftUI (iOS 17+)
 - **Backend**: Supabase (Auth, Database, Realtime)
-- **AI Services**: Claude API, GPT-4
+- **AI Services**: Claude API, ChatGPT-4
 - **Trading Integration**: MetaAPI (MT4/MT5)
 - **Charting**: TradingView iOS SDK
 - **Networking**: URLSession, Combine
