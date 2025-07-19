@@ -1,0 +1,334 @@
+name: iOS App Deployment
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - 'staging'
+          - 'production'
+      build_type:
+        description: 'Build type'
+        required: true
+        default: 'adhoc'
+        type: choice
+        options:
+          - 'adhoc'
+          - 'appstore'
+          - 'enterprise'
+
+env:
+  XCODE_VERSION: '15.1'
+  DERIVED_DATA_PATH: 'DerivedData'
+
+jobs:
+  prepare-build:
+    name: Prepare Build Environment
+    runs-on: macos-14
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      build_number: ${{ steps.version.outputs.build_number }}
+      
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Generate Version Info
+      id: version
+      run: |
+        if [[ $GITHUB_REF == refs/tags/* ]]; then
+          VERSION=${GITHUB_REF#refs/tags/v}
+        else
+          VERSION="1.0.0-$(date +%Y%m%d)"
+        fi
+        BUILD_NUMBER=${{ github.run_number }}
+        
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "build_number=$BUILD_NUMBER" >> $GITHUB_OUTPUT
+        
+        echo "📱 Building Pipflow v$VERSION ($BUILD_NUMBER)"
+
+  build-ios:
+    name: Build iOS App
+    runs-on: macos-14
+    needs: prepare-build
+    strategy:
+      matrix:
+        scheme: [Pipflow]
+        configuration: [Release]
+        
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Select Xcode version
+      run: sudo xcode-select -s /Applications/Xcode_${{ env.XCODE_VERSION }}.app/Contents/Developer
+      
+    - name: Cache Swift Package Manager
+      uses: actions/cache@v4
+      with:
+        path: |
+          Pipflow/.build
+          ~/Library/Caches/org.swift.swiftpm
+        key: ${{ runner.os }}-spm-${{ hashFiles('Pipflow/Package.swift') }}
+        
+    - name: Cache DerivedData
+      uses: actions/cache@v4
+      with:
+        path: ~/Library/Developer/Xcode/DerivedData
+        key: ${{ runner.os }}-deriveddata-release-${{ hashFiles('Pipflow/**/*.swift') }}
+        
+    - name: Update Version and Build Number
+      run: |
+        cd Pipflow
+        # Update Info.plist with version info
+        /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${{ needs.prepare-build.outputs.version }}" Pipflow/Info.plist || true
+        /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ needs.prepare-build.outputs.build_number }}" Pipflow/Info.plist || true
+        
+        echo "Updated app version to ${{ needs.prepare-build.outputs.version }} (${{ needs.prepare-build.outputs.build_number }})"
+        
+    - name: Resolve Dependencies
+      run: |
+        cd Pipflow
+        xcodebuild -resolvePackageDependencies -scheme ${{ matrix.scheme }}
+        
+    - name: Build Archive
+      run: |
+        cd Pipflow
+        xcodebuild archive \
+          -scheme ${{ matrix.scheme }} \
+          -configuration ${{ matrix.configuration }} \
+          -destination 'generic/platform=iOS' \
+          -archivePath "build/${{ matrix.scheme }}.xcarchive" \
+          -derivedDataPath ${{ env.DERIVED_DATA_PATH }} \
+          CODE_SIGNING_ALLOWED=NO \
+          DEVELOPMENT_TEAM="" \
+          CODE_SIGN_IDENTITY="" \
+          PROVISIONING_PROFILE_SPECIFIER=""
+          
+    - name: Generate IPA (Simulator Build)
+      run: |
+        cd Pipflow
+        # For demonstration, create a simulator build
+        xcodebuild build \
+          -scheme ${{ matrix.scheme }} \
+          -configuration ${{ matrix.configuration }} \
+          -destination 'platform=iOS Simulator,name=iPhone 15 Pro,OS=17.2' \
+          -derivedDataPath ${{ env.DERIVED_DATA_PATH }} \
+          CODE_SIGNING_ALLOWED=NO
+          
+        # Create app bundle info
+        APP_PATH=$(find ${{ env.DERIVED_DATA_PATH }} -name "*.app" | head -1)
+        if [ -n "$APP_PATH" ]; then
+          echo "App built at: $APP_PATH"
+          ditto "$APP_PATH" "build/Pipflow.app"
+        fi
+        
+    - name: Generate Build Artifacts
+      run: |
+        cd Pipflow
+        mkdir -p build/artifacts
+        
+        # Create build info
+        cat > build/artifacts/build-info.json << EOF
+        {
+          "app_name": "Pipflow",
+          "version": "${{ needs.prepare-build.outputs.version }}",
+          "build_number": "${{ needs.prepare-build.outputs.build_number }}",
+          "configuration": "${{ matrix.configuration }}",
+          "xcode_version": "${{ env.XCODE_VERSION }}",
+          "build_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+          "git_commit": "${{ github.sha }}",
+          "branch": "${{ github.ref_name }}",
+          "environment": "${{ github.event.inputs.environment || 'staging' }}"
+        }
+        EOF
+        
+        # Generate app size report
+        if [ -d "build/Pipflow.app" ]; then
+          du -sh build/Pipflow.app > build/artifacts/app-size.txt
+          find build/Pipflow.app -name "*.dylib" -o -name "*.framework" | head -20 > build/artifacts/dependencies.txt
+        fi
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-build-${{ matrix.scheme }}-${{ matrix.configuration }}
+        path: |
+          Pipflow/build/
+        retention-days: 30
+
+  quality-checks:
+    name: Quality & Security Checks
+    runs-on: macos-14
+    needs: build-ios
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Download Build Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: ios-build-*
+        merge-multiple: true
+        path: ./builds
+        
+    - name: App Size Analysis
+      run: |
+        echo "📊 App Size Analysis"
+        
+        if [ -f "builds/artifacts/app-size.txt" ]; then
+          APP_SIZE=$(cat builds/artifacts/app-size.txt)
+          echo "App Size: $APP_SIZE"
+          
+          # Convert to MB for comparison
+          SIZE_MB=$(echo "$APP_SIZE" | grep -o '[0-9.]*M\|[0-9.]*G' | sed 's/M//' | sed 's/G/*1024/' | bc 2>/dev/null || echo "0")
+          
+          if (( $(echo "$SIZE_MB > 100" | bc -l) )); then
+            echo "⚠️ Warning: App size is large (${APP_SIZE})"
+          else
+            echo "✅ App size is acceptable (${APP_SIZE})"
+          fi
+        else
+          echo "ℹ️ App size information not available"
+        fi
+        
+    - name: Security Scan
+      run: |
+        echo "🔒 Security Analysis"
+        
+        # Check for common security issues
+        cd Pipflow
+        
+        # Look for hardcoded secrets
+        echo "Checking for hardcoded secrets..."
+        grep -r "password\|secret\|api_key\|token" --include="*.swift" . | grep -v "//.*password" || echo "No obvious secrets found"
+        
+        # Check for insecure network calls
+        echo "Checking for insecure network calls..."
+        grep -r "http://" --include="*.swift" . || echo "No insecure HTTP calls found"
+        
+        # Check Info.plist security settings
+        echo "Checking security settings..."
+        if [ -f "Pipflow/Info.plist" ]; then
+          plutil -p Pipflow/Info.plist | grep -i "transport\|security" || echo "Default security settings"
+        fi
+
+  generate-release-notes:
+    name: Generate Release Notes
+    runs-on: ubuntu-latest
+    needs: [prepare-build, quality-checks]
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Get full history for changelog
+        
+    - name: Generate Changelog
+      run: |
+        echo "📝 Generating Release Notes for v${{ needs.prepare-build.outputs.version }}"
+        
+        # Get previous tag
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        
+        if [ -n "$PREVIOUS_TAG" ]; then
+          echo "Changes since $PREVIOUS_TAG:" > release-notes.md
+          echo "" >> release-notes.md
+          
+          # Get commits since last tag
+          git log $PREVIOUS_TAG..HEAD --pretty=format:"- %s (%h)" --reverse >> release-notes.md
+        else
+          echo "Initial release of Pipflow" > release-notes.md
+          echo "" >> release-notes.md
+          echo "Features included:" >> release-notes.md
+          echo "- AI-powered trading signals" >> release-notes.md
+          echo "- MetaTrader integration" >> release-notes.md
+          echo "- Social trading features" >> release-notes.md
+          echo "- Modern iOS interface" >> release-notes.md
+        fi
+        
+        echo "" >> release-notes.md
+        echo "## Build Information" >> release-notes.md
+        echo "- Version: ${{ needs.prepare-build.outputs.version }}" >> release-notes.md
+        echo "- Build: ${{ needs.prepare-build.outputs.build_number }}" >> release-notes.md
+        echo "- Environment: ${{ github.event.inputs.environment || 'production' }}" >> release-notes.md
+        echo "- Xcode Version: ${{ env.XCODE_VERSION }}" >> release-notes.md
+        
+    - name: Upload Release Notes
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-notes
+        path: release-notes.md
+        retention-days: 90
+
+  create-github-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [prepare-build, build-ios, generate-release-notes]
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: "*"
+        merge-multiple: true
+        path: ./release-assets
+        
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref_name }}
+        release_name: Pipflow v${{ needs.prepare-build.outputs.version }}
+        body_path: ./release-assets/release-notes.md
+        draft: false
+        prerelease: ${{ contains(github.ref_name, 'beta') || contains(github.ref_name, 'alpha') }}
+        
+  notify-deployment:
+    name: Deployment Notification
+    runs-on: ubuntu-latest
+    needs: [prepare-build, build-ios, quality-checks]
+    if: always()
+    
+    steps:
+    - name: Deployment Summary
+      run: |
+        echo "🚀 Pipflow iOS Deployment Summary"
+        echo "================================="
+        echo "Version: ${{ needs.prepare-build.outputs.version }}"
+        echo "Build: ${{ needs.prepare-build.outputs.build_number }}"
+        echo "Environment: ${{ github.event.inputs.environment || 'auto' }}"
+        echo "Trigger: ${{ github.event_name }}"
+        echo "Status: ${{ job.status }}"
+        echo ""
+        
+        if [ "${{ needs.build-ios.result }}" = "success" ]; then
+          echo "✅ Build completed successfully"
+        else
+          echo "❌ Build failed"
+        fi
+        
+        if [ "${{ needs.quality-checks.result }}" = "success" ]; then
+          echo "✅ Quality checks passed"
+        else
+          echo "⚠️ Quality checks had issues"
+        fi
+        
+        echo ""
+        echo "Next steps:"
+        echo "1. Download build artifacts from GitHub Actions"
+        echo "2. Test the build on physical devices"
+        echo "3. Deploy to TestFlight (manual process)"
+        echo "4. Submit for App Store review when ready" 

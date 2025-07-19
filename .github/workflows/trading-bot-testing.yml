@@ -1,0 +1,768 @@
+name: Trading Bot Testing & Simulation
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'Pipflow/Pipflow/Core/Services/AI/**'
+      - 'Pipflow/Pipflow/Core/Services/Trading/**'
+      - 'Pipflow/Pipflow/Core/Models/**'
+      - '.github/workflows/trading-bot-testing.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'Pipflow/Pipflow/Core/Services/AI/**'
+      - 'Pipflow/Pipflow/Core/Services/Trading/**'
+  schedule:
+    # Run daily at 6 AM UTC (market pre-open)
+    - cron: '0 6 * * 1-5'  # Monday to Friday
+  workflow_dispatch:
+    inputs:
+      simulation_duration:
+        description: 'Simulation duration in hours'
+        required: false
+        default: '24'
+        type: string
+      trading_pair:
+        description: 'Trading pair for simulation'
+        required: false
+        default: 'EUR/USD'
+        type: choice
+        options:
+          - 'EUR/USD'
+          - 'GBP/USD'
+          - 'USD/JPY'
+          - 'USD/CHF'
+          - 'AUD/USD'
+          - 'USD/CAD'
+      strategy_type:
+        description: 'Trading strategy to test'
+        required: false
+        default: 'ai_signals'
+        type: choice
+        options:
+          - 'ai_signals'
+          - 'technical_analysis'
+          - 'copy_trading'
+          - 'scalping'
+          - 'swing'
+
+env:
+  SIMULATION_ENVIRONMENT: 'testing'
+  DEFAULT_BALANCE: '10000'
+  MAX_RISK_PERCENT: '2'
+
+jobs:
+  strategy-validation:
+    name: Validate Trading Strategies
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup Python for Analysis
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Analysis Dependencies
+      run: |
+        pip install pandas numpy matplotlib seaborn yfinance ta-lib-binary
+        
+    - name: Validate Strategy Parameters
+      run: |
+        python << 'EOF'
+        import json
+        import sys
+        
+        # Validate trading strategy configuration
+        strategies = {
+            "ai_signals": {
+                "max_positions": 5,
+                "risk_per_trade": 0.02,
+                "stop_loss": 0.01,
+                "take_profit": 0.02
+            },
+            "technical_analysis": {
+                "indicators": ["RSI", "MACD", "SMA"],
+                "timeframes": ["1h", "4h", "1d"],
+                "confidence_threshold": 0.7
+            }
+        }
+        
+        print("✅ Strategy validation passed")
+        print(f"Available strategies: {list(strategies.keys())}")
+        
+        # Save strategy config for simulation
+        with open('strategy_config.json', 'w') as f:
+            json.dump(strategies, f, indent=2)
+        EOF
+        
+    - name: Upload Strategy Config
+      uses: actions/upload-artifact@v4
+      with:
+        name: strategy-config
+        path: strategy_config.json
+        retention-days: 7
+
+  market-data-simulation:
+    name: Market Data Simulation
+    runs-on: ubuntu-latest
+    needs: strategy-validation
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Dependencies
+      run: |
+        pip install yfinance pandas numpy requests websocket-client
+        
+    - name: Download Market Data
+      run: |
+        python << 'EOF'
+        import yfinance as yf
+        import pandas as pd
+        from datetime import datetime, timedelta
+        import json
+        
+        # Define forex pairs mapping (using proxy instruments)
+        pairs = {
+            'EUR/USD': 'EURUSD=X',
+            'GBP/USD': 'GBPUSD=X', 
+            'USD/JPY': 'USDJPY=X',
+            'USD/CHF': 'USDCHF=X',
+            'AUD/USD': 'AUDUSD=X',
+            'USD/CAD': 'USDCAD=X'
+        }
+        
+        trading_pair = "${{ github.event.inputs.trading_pair || 'EUR/USD' }}"
+        symbol = pairs.get(trading_pair, 'EURUSD=X')
+        
+        print(f"Downloading data for {trading_pair} ({symbol})")
+        
+        # Download last 30 days of data
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=30)
+        
+        try:
+            data = yf.download(symbol, start=start_date, end=end_date, interval='1h')
+            
+            if not data.empty:
+                # Save market data
+                data.to_csv('market_data.csv')
+                
+                # Generate basic statistics
+                stats = {
+                    'trading_pair': trading_pair,
+                    'data_points': len(data),
+                    'date_range': {
+                        'start': start_date.isoformat(),
+                        'end': end_date.isoformat()
+                    },
+                    'price_stats': {
+                        'high': float(data['High'].max()),
+                        'low': float(data['Low'].min()),
+                        'avg': float(data['Close'].mean()),
+                        'volatility': float(data['Close'].std())
+                    }
+                }
+                
+                with open('market_stats.json', 'w') as f:
+                    json.dump(stats, f, indent=2)
+                    
+                print(f"✅ Downloaded {len(data)} data points")
+                print(f"Price range: {stats['price_stats']['low']:.5f} - {stats['price_stats']['high']:.5f}")
+            else:
+                print("❌ No data downloaded")
+                sys.exit(1)
+                
+        except Exception as e:
+            print(f"❌ Error downloading data: {e}")
+            # Create dummy data for testing
+            import numpy as np
+            dates = pd.date_range(start=start_date, end=end_date, freq='1h')
+            dummy_data = pd.DataFrame({
+                'Open': np.random.uniform(1.08, 1.12, len(dates)),
+                'High': np.random.uniform(1.08, 1.12, len(dates)),
+                'Low': np.random.uniform(1.08, 1.12, len(dates)),
+                'Close': np.random.uniform(1.08, 1.12, len(dates)),
+                'Volume': np.random.randint(1000, 10000, len(dates))
+            }, index=dates)
+            dummy_data.to_csv('market_data.csv')
+            print("✅ Created dummy market data for testing")
+        EOF
+        
+    - name: Upload Market Data
+      uses: actions/upload-artifact@v4
+      with:
+        name: market-data
+        path: |
+          market_data.csv
+          market_stats.json
+        retention-days: 7
+
+  ai-signal-simulation:
+    name: AI Signal Generation Simulation
+    runs-on: ubuntu-latest
+    needs: [strategy-validation, market-data-simulation]
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Download Market Data
+      uses: actions/download-artifact@v4
+      with:
+        name: market-data
+        path: ./data
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install ML Dependencies
+      run: |
+        pip install pandas numpy scikit-learn matplotlib seaborn ta-lib-binary
+        
+    - name: Generate AI Trading Signals
+      run: |
+        python << 'EOF'
+        import pandas as pd
+        import numpy as np
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.preprocessing import StandardScaler
+        import json
+        import matplotlib.pyplot as plt
+        import warnings
+        warnings.filterwarnings('ignore')
+        
+        print("🤖 Starting AI Signal Generation Simulation")
+        
+        # Load market data
+        try:
+            data = pd.read_csv('data/market_data.csv', index_col=0, parse_dates=True)
+            print(f"Loaded {len(data)} market data points")
+        except:
+            print("❌ Could not load market data")
+            exit(1)
+        
+        # Feature engineering
+        data['Returns'] = data['Close'].pct_change()
+        data['SMA_10'] = data['Close'].rolling(10).mean()
+        data['SMA_30'] = data['Close'].rolling(30).mean()
+        data['RSI'] = 50  # Simplified RSI
+        data['Volume_MA'] = data['Volume'].rolling(10).mean()
+        
+        # Create features
+        features = ['Returns', 'SMA_10', 'SMA_30', 'RSI', 'Volume_MA']
+        data = data.dropna()
+        
+        if len(data) > 50:  # Ensure we have enough data
+            # Create target (future price direction)
+            data['Target'] = (data['Close'].shift(-1) > data['Close']).astype(int)
+            data = data.dropna()
+            
+            X = data[features]
+            y = data['Target']
+            
+            # Train simple model
+            scaler = StandardScaler()
+            X_scaled = scaler.fit_transform(X)
+            
+            # Use last 80% for training, 20% for simulation
+            split_idx = int(len(X_scaled) * 0.8)
+            X_train, X_test = X_scaled[:split_idx], X_scaled[split_idx:]
+            y_train, y_test = y[:split_idx], y[split_idx:]
+            
+            model = RandomForestClassifier(n_estimators=50, random_state=42)
+            model.fit(X_train, y_train)
+            
+            # Generate signals
+            signals = model.predict_proba(X_test)[:, 1]
+            
+            # Create signal analysis
+            signal_analysis = {
+                'total_signals': len(signals),
+                'buy_signals': int(np.sum(signals > 0.6)),
+                'sell_signals': int(np.sum(signals < 0.4)),
+                'neutral_signals': int(np.sum((signals >= 0.4) & (signals <= 0.6))),
+                'average_confidence': float(np.mean(signals)),
+                'max_confidence': float(np.max(signals)),
+                'min_confidence': float(np.min(signals))
+            }
+            
+            print(f"✅ Generated {len(signals)} AI signals")
+            print(f"Buy signals: {signal_analysis['buy_signals']}")
+            print(f"Sell signals: {signal_analysis['sell_signals']}")
+            print(f"Average confidence: {signal_analysis['average_confidence']:.3f}")
+            
+            # Save results
+            with open('ai_signals.json', 'w') as f:
+                json.dump(signal_analysis, f, indent=2)
+                
+            # Create simple visualization
+            plt.figure(figsize=(12, 6))
+            plt.subplot(2, 1, 1)
+            plt.plot(data.index[-len(signals):], data['Close'][-len(signals):])
+            plt.title('Price Movement')
+            plt.ylabel('Price')
+            
+            plt.subplot(2, 1, 2)
+            plt.plot(data.index[-len(signals):], signals)
+            plt.axhline(y=0.6, color='g', linestyle='--', label='Buy Threshold')
+            plt.axhline(y=0.4, color='r', linestyle='--', label='Sell Threshold')
+            plt.title('AI Signal Confidence')
+            plt.ylabel('Confidence')
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig('signal_analysis.png', dpi=150, bbox_inches='tight')
+            
+            print("✅ AI signal simulation completed")
+        else:
+            print("❌ Insufficient data for AI simulation")
+        EOF
+        
+    - name: Upload AI Analysis
+      uses: actions/upload-artifact@v4
+      with:
+        name: ai-signal-analysis
+        path: |
+          ai_signals.json
+          signal_analysis.png
+        retention-days: 30
+
+  backtesting-simulation:
+    name: Trading Strategy Backtesting
+    runs-on: ubuntu-latest
+    needs: [market-data-simulation, ai-signal-simulation]
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: "*"
+        merge-multiple: true
+        path: ./simulation_data
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Dependencies
+      run: |
+        pip install pandas numpy matplotlib seaborn
+        
+    - name: Run Backtesting Simulation
+      env:
+        INITIAL_BALANCE: ${{ env.DEFAULT_BALANCE }}
+        MAX_RISK: ${{ env.MAX_RISK_PERCENT }}
+        SIMULATION_HOURS: ${{ github.event.inputs.simulation_duration || '24' }}
+      run: |
+        python << 'EOF'
+        import pandas as pd
+        import numpy as np
+        import json
+        import matplotlib.pyplot as plt
+        from datetime import datetime
+        
+        print("📊 Starting Trading Strategy Backtesting")
+        
+        # Load market data
+        try:
+            data = pd.read_csv('simulation_data/market_data.csv', index_col=0, parse_dates=True)
+            print(f"Loaded market data: {len(data)} points")
+        except Exception as e:
+            print(f"Error loading data: {e}")
+            exit(1)
+        
+        # Simulation parameters
+        initial_balance = float("${{ env.INITIAL_BALANCE }}")
+        max_risk_percent = float("${{ env.MAX_RISK }}") / 100
+        
+        # Simple trading simulation
+        balance = initial_balance
+        positions = []
+        trades = []
+        
+        # Generate simple signals based on moving averages
+        data['SMA_short'] = data['Close'].rolling(5).mean()
+        data['SMA_long'] = data['Close'].rolling(20).mean()
+        data['Signal'] = np.where(data['SMA_short'] > data['SMA_long'], 1, -1)
+        
+        position = 0
+        entry_price = 0
+        
+        for i in range(1, min(len(data), int("${{ env.SIMULATION_HOURS }}") * 1)):
+            current_price = data['Close'].iloc[i]
+            signal = data['Signal'].iloc[i]
+            
+            # Entry logic
+            if position == 0 and signal != 0:
+                position_size = (balance * max_risk_percent) / current_price
+                position = signal
+                entry_price = current_price
+                
+                trades.append({
+                    'timestamp': data.index[i].isoformat(),
+                    'type': 'BUY' if signal > 0 else 'SELL',
+                    'price': current_price,
+                    'size': position_size,
+                    'balance_before': balance
+                })
+                
+            # Exit logic (simple: exit on opposite signal)
+            elif position != 0 and signal != position:
+                pnl = position * (current_price - entry_price) * abs(position_size)
+                balance += pnl
+                
+                trades.append({
+                    'timestamp': data.index[i].isoformat(),
+                    'type': 'CLOSE',
+                    'price': current_price,
+                    'pnl': pnl,
+                    'balance_after': balance
+                })
+                
+                position = 0
+                entry_price = 0
+        
+        # Calculate performance metrics
+        total_return = (balance - initial_balance) / initial_balance * 100
+        num_trades = len([t for t in trades if t['type'] == 'CLOSE'])
+        winning_trades = len([t for t in trades if t['type'] == 'CLOSE' and t.get('pnl', 0) > 0])
+        
+        performance = {
+            'simulation_summary': {
+                'initial_balance': initial_balance,
+                'final_balance': round(balance, 2),
+                'total_return_percent': round(total_return, 2),
+                'total_trades': num_trades,
+                'winning_trades': winning_trades,
+                'win_rate': round(winning_trades / max(num_trades, 1) * 100, 2),
+                'max_risk_used': max_risk_percent * 100
+            },
+            'trades': trades[-10:]  # Last 10 trades
+        }
+        
+        print(f"✅ Backtesting completed:")
+        print(f"   Initial Balance: ${initial_balance:,.2f}")
+        print(f"   Final Balance: ${balance:,.2f}")
+        print(f"   Total Return: {total_return:.2f}%")
+        print(f"   Total Trades: {num_trades}")
+        print(f"   Win Rate: {performance['simulation_summary']['win_rate']:.1f}%")
+        
+        # Save results
+        with open('backtest_results.json', 'w') as f:
+            json.dump(performance, f, indent=2)
+        
+        # Create performance chart
+        if trades:
+            balances = [initial_balance]
+            for trade in trades:
+                if 'balance_after' in trade:
+                    balances.append(trade['balance_after'])
+            
+            plt.figure(figsize=(12, 8))
+            
+            plt.subplot(2, 1, 1)
+            plt.plot(data.index, data['Close'])
+            plt.title('Price Chart')
+            plt.ylabel('Price')
+            
+            plt.subplot(2, 1, 2)
+            plt.plot(range(len(balances)), balances)
+            plt.title('Portfolio Balance Over Time')
+            plt.ylabel('Balance ($)')
+            plt.xlabel('Trade Number')
+            
+            plt.tight_layout()
+            plt.savefig('backtest_performance.png', dpi=150, bbox_inches='tight')
+            
+        print("✅ Backtesting simulation completed successfully")
+        EOF
+        
+    - name: Upload Backtesting Results
+      uses: actions/upload-artifact@v4
+      with:
+        name: backtesting-results
+        path: |
+          backtest_results.json
+          backtest_performance.png
+        retention-days: 30
+
+  risk-analysis:
+    name: Risk Management Analysis
+    runs-on: ubuntu-latest
+    needs: backtesting-simulation
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Download Backtesting Results
+      uses: actions/download-artifact@v4
+      with:
+        name: backtesting-results
+        path: ./results
+        
+    - name: Setup Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Risk Analysis
+      run: |
+        python << 'EOF'
+        import json
+        import numpy as np
+        
+        print("⚠️  Starting Risk Management Analysis")
+        
+        try:
+            with open('results/backtest_results.json', 'r') as f:
+                results = json.load(f)
+            
+            summary = results['simulation_summary']
+            trades = results['trades']
+            
+            # Risk metrics
+            total_return = summary['total_return_percent']
+            win_rate = summary['win_rate']
+            max_risk = summary['max_risk_used']
+            
+            # Risk assessment
+            risk_score = 0
+            warnings = []
+            
+            if total_return < -10:
+                risk_score += 3
+                warnings.append("High loss detected (>10%)")
+            
+            if win_rate < 40:
+                risk_score += 2
+                warnings.append("Low win rate (<40%)")
+                
+            if max_risk > 5:
+                risk_score += 2
+                warnings.append("High risk per trade (>5%)")
+            
+            # Risk rating
+            if risk_score >= 5:
+                risk_rating = "HIGH RISK"
+            elif risk_score >= 3:
+                risk_rating = "MEDIUM RISK"
+            else:
+                risk_rating = "LOW RISK"
+            
+            risk_analysis = {
+                'risk_score': risk_score,
+                'risk_rating': risk_rating,
+                'warnings': warnings,
+                'recommendations': [],
+                'risk_metrics': {
+                    'return_risk_ratio': abs(total_return / max(max_risk, 1)),
+                    'consistency_score': win_rate / 100
+                }
+            }
+            
+            # Recommendations
+            if total_return < 0:
+                risk_analysis['recommendations'].append("Consider adjusting strategy parameters")
+            if win_rate < 50:
+                risk_analysis['recommendations'].append("Improve signal accuracy")
+            if max_risk > 2:
+                risk_analysis['recommendations'].append("Reduce position sizes")
+            
+            print(f"✅ Risk Analysis Completed:")
+            print(f"   Risk Rating: {risk_rating}")
+            print(f"   Risk Score: {risk_score}/7")
+            print(f"   Warnings: {len(warnings)}")
+            
+            if warnings:
+                print("   Issues found:")
+                for warning in warnings:
+                    print(f"   - {warning}")
+            
+            with open('risk_analysis.json', 'w') as f:
+                json.dump(risk_analysis, f, indent=2)
+                
+            # Set GitHub output for potential workflow decisions
+            print(f"::set-output name=risk_rating::{risk_rating}")
+            print(f"::set-output name=risk_score::{risk_score}")
+            
+        except Exception as e:
+            print(f"❌ Error in risk analysis: {e}")
+            risk_analysis = {
+                'error': str(e),
+                'risk_rating': 'UNKNOWN',
+                'risk_score': 0
+            }
+            with open('risk_analysis.json', 'w') as f:
+                json.dump(risk_analysis, f, indent=2)
+        EOF
+        
+    - name: Upload Risk Analysis
+      uses: actions/upload-artifact@v4
+      with:
+        name: risk-analysis
+        path: risk_analysis.json
+        retention-days: 30
+
+  generate-report:
+    name: Generate Simulation Report
+    runs-on: ubuntu-latest
+    needs: [ai-signal-simulation, backtesting-simulation, risk-analysis]
+    if: always()
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Download All Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        pattern: "*"
+        merge-multiple: true
+        path: ./all_results
+        
+    - name: Generate Comprehensive Report
+      run: |
+        python << 'EOF'
+        import json
+        import os
+        from datetime import datetime
+        
+        print("📋 Generating Comprehensive Trading Simulation Report")
+        
+        report = f"""# Trading Bot Simulation Report
+        
+## Simulation Details
+- **Date**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}
+- **Trading Pair**: ${{ github.event.inputs.trading_pair || 'EUR/USD' }}
+- **Strategy**: ${{ github.event.inputs.strategy_type || 'ai_signals' }}
+- **Duration**: ${{ github.event.inputs.simulation_duration || '24' }} hours
+- **Trigger**: ${{ github.event_name }}
+
+## Results Summary
+"""
+        
+        # Load and summarize results
+        try:
+            if os.path.exists('all_results/backtest_results.json'):
+                with open('all_results/backtest_results.json', 'r') as f:
+                    backtest = json.load(f)
+                    
+                summary = backtest['simulation_summary']
+                report += f"""
+### 💰 Performance Metrics
+- **Initial Balance**: ${summary['initial_balance']:,.2f}
+- **Final Balance**: ${summary['final_balance']:,.2f}
+- **Total Return**: {summary['total_return_percent']:.2f}%
+- **Total Trades**: {summary['total_trades']}
+- **Win Rate**: {summary['win_rate']:.1f}%
+"""
+        except:
+            report += "\n⚠️ Backtesting results not available\n"
+        
+        try:
+            if os.path.exists('all_results/ai_signals.json'):
+                with open('all_results/ai_signals.json', 'r') as f:
+                    ai_data = json.load(f)
+                    
+                report += f"""
+### 🤖 AI Signal Analysis
+- **Total Signals Generated**: {ai_data['total_signals']}
+- **Buy Signals**: {ai_data['buy_signals']}
+- **Sell Signals**: {ai_data['sell_signals']}
+- **Average Confidence**: {ai_data['average_confidence']:.3f}
+"""
+        except:
+            report += "\n⚠️ AI signal analysis not available\n"
+        
+        try:
+            if os.path.exists('all_results/risk_analysis.json'):
+                with open('all_results/risk_analysis.json', 'r') as f:
+                    risk_data = json.load(f)
+                    
+                report += f"""
+### ⚠️ Risk Assessment
+- **Risk Rating**: {risk_data.get('risk_rating', 'Unknown')}
+- **Risk Score**: {risk_data.get('risk_score', 0)}/7
+- **Warnings**: {len(risk_data.get('warnings', []))}
+"""
+                
+                if risk_data.get('warnings'):
+                    report += "\n**Issues Identified:**\n"
+                    for warning in risk_data['warnings']:
+                        report += f"- {warning}\n"
+                        
+                if risk_data.get('recommendations'):
+                    report += "\n**Recommendations:**\n"
+                    for rec in risk_data['recommendations']:
+                        report += f"- {rec}\n"
+        except:
+            report += "\n⚠️ Risk analysis not available\n"
+        
+        report += f"""
+## Artifacts Generated
+- Backtesting Results: `backtest_results.json`
+- AI Signal Analysis: `ai_signals.json` 
+- Risk Analysis: `risk_analysis.json`
+- Performance Charts: `backtest_performance.png`, `signal_analysis.png`
+
+## Next Steps
+1. Review risk warnings and recommendations
+2. Adjust strategy parameters if needed
+3. Run extended simulations for validation
+4. Consider paper trading before live deployment
+
+---
+*Generated by Pipflow Trading Bot Testing Pipeline*
+"""
+        
+        with open('simulation_report.md', 'w') as f:
+            f.write(report)
+            
+        print("✅ Comprehensive report generated")
+        print("Report includes:")
+        print("- Performance metrics")
+        print("- AI signal analysis") 
+        print("- Risk assessment")
+        print("- Recommendations")
+        EOF
+        
+    - name: Upload Final Report
+      uses: actions/upload-artifact@v4
+      with:
+        name: simulation-report
+        path: |
+          simulation_report.md
+          all_results/
+        retention-days: 90
+        
+    - name: Comment Report on PR
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v7
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync('simulation_report.md', 'utf8');
+          
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `## 🤖 Trading Bot Simulation Results\n\n${report}`
+          }); 

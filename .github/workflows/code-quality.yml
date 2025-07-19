@@ -1,0 +1,124 @@
+name: Code Quality & Security
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    # Run weekly security scans
+    - cron: '0 2 * * 1'  # Monday at 2 AM UTC
+
+jobs:
+  lint-and-format:
+    name: Linting & Code Format
+    runs-on: macos-14
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Install SwiftLint
+      run: brew install swiftlint
+      
+    - name: Run SwiftLint
+      run: |
+        cd Pipflow
+        swiftlint lint --reporter github-actions-logging
+        
+    - name: Run SwiftLint (Autocorrect)
+      run: |
+        cd Pipflow
+        swiftlint --fix
+        
+    - name: Check for formatting changes
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "⚠️ SwiftLint found formatting issues"
+          git diff
+          exit 1
+        else
+          echo "✅ Code formatting is correct"
+        fi
+
+  security-scan:
+    name: Security Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Run Secrets Detection
+      run: |
+        echo "🔍 Scanning for secrets and sensitive data"
+        
+        # Check for API keys, tokens, passwords
+        find . -name "*.swift" -o -name "*.json" -o -name "*.plist" | xargs grep -l "api_key\|password\|secret\|token\|key.*=" || echo "No obvious secrets found"
+        
+        # Check for hardcoded URLs that might be sensitive
+        find . -name "*.swift" | xargs grep -l "http.*://" || echo "No hardcoded URLs found"
+        
+    - name: Check Dependencies
+      run: |
+        echo "📦 Analyzing dependencies"
+        
+        if [ -f "Pipflow/Package.swift" ]; then
+          echo "Swift Package Manager dependencies:"
+          grep -A 10 "dependencies:" Pipflow/Package.swift || echo "No external dependencies found"
+        fi
+
+  code-metrics:
+    name: Code Metrics & Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      
+    - name: Calculate Code Metrics
+      run: |
+        echo "📊 Code Metrics Analysis"
+        echo "========================"
+        
+        # Count Swift files
+        SWIFT_FILES=$(find . -name "*.swift" | wc -l)
+        echo "Swift files: $SWIFT_FILES"
+        
+        # Count lines of code
+        LINES_OF_CODE=$(find . -name "*.swift" -exec wc -l {} + | tail -1 | awk '{print $1}')
+        echo "Lines of code: $LINES_OF_CODE"
+        
+        # Average lines per file
+        if [ $SWIFT_FILES -gt 0 ]; then
+          AVG_LINES=$((LINES_OF_CODE / SWIFT_FILES))
+          echo "Average lines per file: $AVG_LINES"
+        fi
+        
+        # Find largest files
+        echo ""
+        echo "Largest files:"
+        find . -name "*.swift" -exec wc -l {} + | sort -nr | head -5
+        
+        # Count TODO and FIXME comments
+        TODO_COUNT=$(find . -name "*.swift" -exec grep -l "TODO\|FIXME" {} \; | wc -l)
+        echo ""
+        echo "Files with TODO/FIXME: $TODO_COUNT"
+        
+        # Generate summary
+        cat > code-metrics.json << EOF
+        {
+          "swift_files": $SWIFT_FILES,
+          "lines_of_code": $LINES_OF_CODE,
+          "average_lines_per_file": $((LINES_OF_CODE / SWIFT_FILES)),
+          "files_with_todos": $TODO_COUNT,
+          "analysis_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+        }
+        EOF
+        
+    - name: Upload Metrics
+      uses: actions/upload-artifact@v4
+      with:
+        name: code-metrics
+        path: code-metrics.json
+        retention-days: 30 
