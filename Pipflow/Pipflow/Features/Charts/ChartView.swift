@@ -55,7 +55,7 @@ struct ChartView: View {
                     
                     // Timeframe Selector
                     TimeframeSelectorView(selectedTimeframe: $selectedTimeframe)
-                        .onChange(of: selectedTimeframe) { newTimeframe in
+                        .onChange(of: selectedTimeframe) { _, newTimeframe in
                             viewModel.changeTimeframe(to: newTimeframe)
                         }
                     
@@ -291,8 +291,8 @@ struct ChartContentView: View {
                                     .foregroundColor(themeManager.currentTheme.secondaryTextColor)
                             }
                         }
-                        AxisGridLine()
-                            .stroke(themeManager.currentTheme.separatorColor.opacity(0.3))
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 1))
+                            .foregroundStyle(themeManager.currentTheme.separatorColor.opacity(0.3))
                     }
                 }
                 .chartYAxis {
@@ -304,8 +304,8 @@ struct ChartContentView: View {
                                     .foregroundColor(themeManager.currentTheme.secondaryTextColor)
                             }
                         }
-                        AxisGridLine()
-                            .stroke(themeManager.currentTheme.separatorColor.opacity(0.3))
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 1))
+                            .foregroundStyle(themeManager.currentTheme.separatorColor.opacity(0.3))
                     }
                 }
                 .frame(height: geometry.size.height)

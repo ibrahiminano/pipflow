@@ -24,7 +24,7 @@ enum AppTheme: String, CaseIterable {
         case .black:
             return Color(red: 0.33, green: 0.44, blue: 0.59)
         case .orange:
-            return Color(red: 0.53, green: 0.64, blue: 0.79)
+            return Color(red: 0.96, green: 0.64, blue: 0.18) // Vibrant orange color
         case .blue:
             return Color(red: 0.224, green: 0.478, blue: 0.996)
         case .purple:
@@ -39,8 +39,8 @@ enum AppTheme: String, CaseIterable {
         case .black:
             return [Color.black, Color.gray.opacity(0.8)]
         case .orange:
-            return [Color(red: 0.33, green: 0.44, blue: 0.59), 
-                    Color(red: 0.53, green: 0.64, blue: 0.79)]
+            return [Color(red: 0.96, green: 0.64, blue: 0.18), 
+                    Color(red: 0.98, green: 0.78, blue: 0.35)] // Vibrant orange gradient
         case .blue:
             return [Color(red: 0.224, green: 0.478, blue: 0.996), 
                     Color(red: 0.424, green: 0.678, blue: 1.0)]

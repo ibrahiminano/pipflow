@@ -25,7 +25,7 @@ struct Theme {
         name: "Orange",
         backgroundColor: Color(UIColor.systemBackground),
         secondaryBackgroundColor: Color(UIColor.secondarySystemBackground),
-        accentColor: Color(red: 0.53, green: 0.64, blue: 0.79),
+        accentColor: Color(red: 0.96, green: 0.64, blue: 0.18), // Vibrant orange color
         textColor: Color(UIColor.label),
         secondaryTextColor: Color(UIColor.secondaryLabel),
         separatorColor: Color(UIColor.separator),
@@ -68,16 +68,25 @@ struct Theme {
 
 extension Color {
     struct Theme {
-        static let background = Color(red: 0.0, green: 0.0, blue: 0.0) // Pure black
-        static let secondary = Color(red: 0.1, green: 0.1, blue: 0.1) // Dark gray
-        static let text = Color.white
+        // Dynamic colors based on selected theme
+        static var background: Color {
+            ThemeManager.shared.currentTheme.backgroundColor
+        }
+        
+        static var secondary: Color {
+            ThemeManager.shared.currentTheme.secondaryBackgroundColor
+        }
+        
+        static var text: Color {
+            ThemeManager.shared.currentTheme.textColor
+        }
         
         // Dynamic accent color based on selected theme
         static var accent: Color {
             ThemeManager.shared.appTheme.primaryColor
         }
         
-        // Additional modern colors
+        // Additional modern colors (theme independent)
         static let success = Color(red: 0.22, green: 0.80, blue: 0.50)
         static let error = Color(red: 0.95, green: 0.35, blue: 0.35)
         static let warning = Color(red: 0.98, green: 0.75, blue: 0.18)
@@ -96,10 +105,18 @@ extension Color {
             ThemeManager.shared.appTheme.gradientColors.last ?? Color.gray
         }
         
-        // Surface colors
-        static let cardBackground = Color(red: 0.1, green: 0.1, blue: 0.1) // Dark gray
-        static let divider = Color.gray.opacity(0.2)
-        static let shadow = Color.white.opacity(0.1)
+        // Dynamic surface colors
+        static var cardBackground: Color {
+            ThemeManager.shared.currentTheme.secondaryBackgroundColor
+        }
+        
+        static var divider: Color {
+            ThemeManager.shared.currentTheme.separatorColor
+        }
+        
+        static var shadow: Color {
+            ThemeManager.shared.currentTheme.shadowColor
+        }
     }
 }
 
