@@ -20,6 +20,12 @@ struct ChartView: View {
     @State private var showingDrawingTools = false
     @State private var isFullScreen = false
     
+    // AI Features
+    @State private var showAIFeatures = false
+    @State private var selectedAIFeatures: Set<AIChartFeature> = [.signals]
+    @State private var showingAISettings = false
+    @State private var aiAnalysisResult: AIChartAnalysis?
+    
     init(symbol: String) {
         self.symbol = symbol
         self._viewModel = StateObject(wrappedValue: ChartViewModel(symbol: symbol))
@@ -57,7 +63,20 @@ struct ChartView: View {
                     TimeframeSelectorView(selectedTimeframe: $selectedTimeframe)
                         .onChange(of: selectedTimeframe) { _, newTimeframe in
                             viewModel.changeTimeframe(to: newTimeframe)
+                            if showAIFeatures {
+                                viewModel.refreshAIAnalysis()
+                            }
                         }
+                    
+                    // AI Features Toggle Bar
+                    if showAIFeatures {
+                        AIFeatureToggleBar(
+                            selectedFeatures: $selectedAIFeatures,
+                            onSettingsTapped: { showingAISettings = true }
+                        )
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                    }
                     
                     // Main Chart
                     ZStack {
@@ -70,19 +89,38 @@ struct ChartView: View {
                                 candles: viewModel.candles,
                                 chartType: selectedChartType,
                                 indicators: selectedIndicators,
-                                viewModel: viewModel
+                                viewModel: viewModel,
+                                aiAnalysis: showAIFeatures ? viewModel.aiAnalysis : nil,
+                                selectedAIFeatures: selectedAIFeatures
                             )
+                            
+                            // AI Overlay Components
+                            if showAIFeatures {
+                                AIChartOverlay(
+                                    analysis: viewModel.aiAnalysis,
+                                    selectedFeatures: selectedAIFeatures,
+                                    candles: viewModel.candles
+                                )
+                            }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(themeManager.currentTheme.backgroundColor)
+                    
+                    // AI Commentary Panel
+                    if showAIFeatures && selectedAIFeatures.contains(.commentary) {
+                        AICommentaryPanel(analysis: viewModel.aiAnalysis)
+                            .frame(height: 120)
+                            .padding(.horizontal)
+                    }
                     
                     // Chart Tools Bar
                     ChartToolsBar(
                         selectedChartType: $selectedChartType,
                         showingIndicators: $showingIndicators,
                         showingDrawingTools: $showingDrawingTools,
-                        isFullScreen: $isFullScreen
+                        isFullScreen: $isFullScreen,
+                        showAIFeatures: $showAIFeatures
                     )
                 }
             }
@@ -93,14 +131,27 @@ struct ChartView: View {
             .sheet(isPresented: $showingDrawingTools) {
                 DrawingToolsView()
             }
+            .sheet(isPresented: $showingAISettings) {
+                AIChartSettingsView(
+                    selectedFeatures: $selectedAIFeatures,
+                    viewModel: viewModel
+                )
+            }
             .fullScreenCover(isPresented: $isFullScreen) {
                 FullScreenChartView(
                     symbol: symbol,
                     selectedTimeframe: $selectedTimeframe,
                     selectedChartType: $selectedChartType,
                     selectedIndicators: $selectedIndicators,
-                    isFullScreen: $isFullScreen
+                    isFullScreen: $isFullScreen,
+                    showAIFeatures: showAIFeatures,
+                    selectedAIFeatures: selectedAIFeatures
                 )
+            }
+        }
+        .onAppear {
+            if showAIFeatures {
+                viewModel.startAIAnalysis()
             }
         }
     }
@@ -225,112 +276,78 @@ struct ChartContentView: View {
     let candles: [CandleData]
     let chartType: ChartType
     let indicators: Set<ChartIndicator>
-    @ObservedObject var viewModel: ChartViewModel
+    let viewModel: ChartViewModel
+    let aiAnalysis: AIChartAnalysis?
+    let selectedAIFeatures: Set<AIChartFeature>
     @EnvironmentObject var themeManager: ThemeManager
-    @State private var selectedCandle: CandleData?
-    @State private var dragLocation: CGPoint?
     
     var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // Main Chart
-                Chart(candles) { candle in
-                    switch chartType {
-                    case .candlestick:
-                        CandlestickMark(
-                            x: .value("Time", candle.timestamp),
-                            low: .value("Low", candle.low),
-                            high: .value("High", candle.high),
-                            open: .value("Open", candle.open),
-                            close: .value("Close", candle.close)
-                        )
-                        .foregroundStyle(candle.close > candle.open ? Color.Theme.success : Color.Theme.error)
-                        
-                    case .line:
-                        LineMark(
-                            x: .value("Time", candle.timestamp),
-                            y: .value("Price", candle.close)
-                        )
-                        .foregroundStyle(Color.Theme.accent)
-                        .lineStyle(StrokeStyle(lineWidth: 2))
-                        
-                    case .bar:
-                        RectangleMark(
-                            x: .value("Time", candle.timestamp),
-                            yStart: .value("Low", candle.low),
-                            yEnd: .value("High", candle.high)
-                        )
-                        .foregroundStyle(candle.close > candle.open ? Color.Theme.success : Color.Theme.error)
-                        
-                    case .area:
-                        AreaMark(
-                            x: .value("Time", candle.timestamp),
-                            y: .value("Price", candle.close)
-                        )
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [Color.Theme.accent.opacity(0.5), Color.Theme.accent.opacity(0.1)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
-                        
-                        LineMark(
-                            x: .value("Time", candle.timestamp),
-                            y: .value("Price", candle.close)
-                        )
-                        .foregroundStyle(Color.Theme.accent)
-                    }
-                }
-                .chartXAxis {
-                    AxisMarks(values: .automatic) { value in
-                        AxisValueLabel {
-                            if let date = value.as(Date.self) {
-                                Text(formatAxisDate(date))
-                                    .font(.caption2)
-                                    .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                            }
-                        }
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 1))
-                            .foregroundStyle(themeManager.currentTheme.separatorColor.opacity(0.3))
-                    }
-                }
-                .chartYAxis {
-                    AxisMarks(position: .trailing) { value in
-                        AxisValueLabel {
-                            if let price = value.as(Double.self) {
-                                Text(String(format: "%.5f", price))
-                                    .font(.caption2)
-                                    .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                            }
-                        }
-                        AxisGridLine(stroke: StrokeStyle(lineWidth: 1))
-                            .foregroundStyle(themeManager.currentTheme.separatorColor.opacity(0.3))
-                    }
-                }
-                .frame(height: geometry.size.height)
+        Chart(candles) { candle in
+            switch chartType {
+            case .candlestick:
+                RectangleMark(
+                    x: .value("Time", candle.timestamp),
+                    yStart: .value("Low", candle.low),
+                    yEnd: .value("High", candle.high),
+                    width: 1
+                )
+                .foregroundStyle(themeManager.currentTheme.secondaryTextColor)
                 
-                // Crosshair overlay
-                if let location = dragLocation {
-                    CrosshairView(location: location, geometry: geometry)
-                }
+                RectangleMark(
+                    x: .value("Time", candle.timestamp),
+                    yStart: .value("Open", candle.open),
+                    yEnd: .value("Close", candle.close),
+                    width: 8
+                )
+                .foregroundStyle(candle.close > candle.open ? Color.Theme.success : Color.Theme.error)
+                
+            case .line:
+                LineMark(
+                    x: .value("Time", candle.timestamp),
+                    y: .value("Close", candle.close)
+                )
+                .foregroundStyle(themeManager.currentTheme.accentColor)
+                
+            case .bar:
+                RectangleMark(
+                    x: .value("Time", candle.timestamp),
+                    yStart: .value("Low", candle.low),
+                    yEnd: .value("High", candle.high),
+                    width: 1
+                )
+                .foregroundStyle(themeManager.currentTheme.secondaryTextColor)
+                
+            case .area:
+                AreaMark(
+                    x: .value("Time", candle.timestamp),
+                    y: .value("Close", candle.close)
+                )
+                .foregroundStyle(themeManager.currentTheme.accentColor.opacity(0.3))
+                
+                LineMark(
+                    x: .value("Time", candle.timestamp),
+                    y: .value("Close", candle.close)
+                )
+                .foregroundStyle(themeManager.currentTheme.accentColor)
             }
-            .gesture(
-                DragGesture()
-                    .onChanged { value in
-                        dragLocation = value.location
-                    }
-                    .onEnded { _ in
-                        dragLocation = nil
-                    }
-            )
         }
-    }
-    
-    private func formatAxisDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
+        .chartXAxis {
+            AxisMarks(values: .automatic) { _ in
+                AxisGridLine()
+                    .foregroundStyle(themeManager.currentTheme.secondaryTextColor.opacity(0.2))
+                AxisValueLabel()
+                    .foregroundStyle(themeManager.currentTheme.secondaryTextColor)
+            }
+        }
+        .chartYAxis {
+            AxisMarks(values: .automatic) { _ in
+                AxisGridLine()
+                    .foregroundStyle(themeManager.currentTheme.secondaryTextColor.opacity(0.2))
+                AxisValueLabel()
+                    .foregroundStyle(themeManager.currentTheme.secondaryTextColor)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -408,52 +425,77 @@ struct ChartToolsBar: View {
     @Binding var showingIndicators: Bool
     @Binding var showingDrawingTools: Bool
     @Binding var isFullScreen: Bool
+    @Binding var showAIFeatures: Bool
     @EnvironmentObject var themeManager: ThemeManager
     
     var body: some View {
         HStack(spacing: 20) {
-            // Chart Type
+            // Chart Type Menu
             Menu {
                 ForEach(ChartType.allCases, id: \.self) { type in
-                    Button(action: {
-                        selectedChartType = type
-                    }) {
+                    Button(action: { selectedChartType = type }) {
                         Label(type.name, systemImage: type.icon)
                     }
                 }
             } label: {
-                Image(systemName: selectedChartType.icon)
-                    .foregroundColor(themeManager.currentTheme.textColor)
+                VStack(spacing: 4) {
+                    Image(systemName: selectedChartType.icon)
+                        .font(.system(size: 20))
+                    Text("Chart")
+                        .font(.caption2)
+                }
+                .foregroundColor(themeManager.currentTheme.textColor)
+            }
+            
+            // AI Features
+            Button(action: { showAIFeatures.toggle() }) {
+                VStack(spacing: 4) {
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 20))
+                        .foregroundColor(showAIFeatures ? themeManager.currentTheme.accentColor : themeManager.currentTheme.textColor)
+                    Text("AI")
+                        .font(.caption2)
+                        .foregroundColor(showAIFeatures ? themeManager.currentTheme.accentColor : themeManager.currentTheme.textColor)
+                }
             }
             
             // Indicators
-            Button(action: {
-                showingIndicators = true
-            }) {
-                Image(systemName: "chart.line.uptrend.xyaxis")
-                    .foregroundColor(themeManager.currentTheme.textColor)
+            Button(action: { showingIndicators = true }) {
+                VStack(spacing: 4) {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.system(size: 20))
+                    Text("Indicators")
+                        .font(.caption2)
+                }
+                .foregroundColor(themeManager.currentTheme.textColor)
             }
             
             // Drawing Tools
-            Button(action: {
-                showingDrawingTools = true
-            }) {
-                Image(systemName: "pencil.tip")
-                    .foregroundColor(themeManager.currentTheme.textColor)
+            Button(action: { showingDrawingTools = true }) {
+                VStack(spacing: 4) {
+                    Image(systemName: "pencil.tip")
+                        .font(.system(size: 20))
+                    Text("Draw")
+                        .font(.caption2)
+                }
+                .foregroundColor(themeManager.currentTheme.textColor)
             }
             
             Spacer()
             
             // Fullscreen
-            Button(action: {
-                isFullScreen = true
-            }) {
-                Image(systemName: "arrow.up.left.and.arrow.down.right")
-                    .foregroundColor(themeManager.currentTheme.textColor)
+            Button(action: { isFullScreen = true }) {
+                VStack(spacing: 4) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 20))
+                    Text("Expand")
+                        .font(.caption2)
+                }
+                .foregroundColor(themeManager.currentTheme.textColor)
             }
         }
         .padding()
-        .background(themeManager.currentTheme.secondaryBackgroundColor)
+        .background(themeManager.currentTheme.cardBackgroundColor)
     }
 }
 
@@ -465,15 +507,19 @@ struct FullScreenChartView: View {
     @Binding var selectedChartType: ChartType
     @Binding var selectedIndicators: Set<ChartIndicator>
     @Binding var isFullScreen: Bool
+    @Binding var showAIFeatures: Bool
+    @Binding var selectedAIFeatures: Set<AIChartFeature>
     @StateObject private var viewModel: ChartViewModel
     @EnvironmentObject var themeManager: ThemeManager
     
-    init(symbol: String, selectedTimeframe: Binding<ChartTimeframe>, selectedChartType: Binding<ChartType>, selectedIndicators: Binding<Set<ChartIndicator>>, isFullScreen: Binding<Bool>) {
+    init(symbol: String, selectedTimeframe: Binding<ChartTimeframe>, selectedChartType: Binding<ChartType>, selectedIndicators: Binding<Set<ChartIndicator>>, isFullScreen: Binding<Bool>, showAIFeatures: Binding<Bool>, selectedAIFeatures: Binding<Set<AIChartFeature>>) {
         self.symbol = symbol
         self._selectedTimeframe = selectedTimeframe
         self._selectedChartType = selectedChartType
         self._selectedIndicators = selectedIndicators
         self._isFullScreen = isFullScreen
+        self._showAIFeatures = showAIFeatures
+        self._selectedAIFeatures = selectedAIFeatures
         self._viewModel = StateObject(wrappedValue: ChartViewModel(symbol: symbol))
     }
     
@@ -507,7 +553,9 @@ struct FullScreenChartView: View {
                     candles: viewModel.candles,
                     chartType: selectedChartType,
                     indicators: selectedIndicators,
-                    viewModel: viewModel
+                    viewModel: viewModel,
+                    aiAnalysis: showAIFeatures ? viewModel.aiAnalysis : nil,
+                    selectedAIFeatures: selectedAIFeatures
                 )
                 .rotationEffect(.degrees(90))
                 .frame(width: UIScreen.main.bounds.height, height: UIScreen.main.bounds.width)
@@ -641,6 +689,10 @@ class ChartViewModel: ObservableObject {
     @Published var priceChangePercent: Double = 0
     @Published var isLoading = false
     
+    // AI Analysis Properties
+    @Published var aiAnalysis: AIChartAnalysis?
+    private var aiAnalysisTimer: Timer?
+    
     private let symbol: String
     private var cancellables = Set<AnyCancellable>()
     private var priceUpdateTimer: Timer?
@@ -653,6 +705,113 @@ class ChartViewModel: ObservableObject {
     
     func changeTimeframe(to timeframe: ChartTimeframe) {
         loadChartData(timeframe: timeframe)
+    }
+    
+    func startAIAnalysis() {
+        aiAnalysisTimer?.invalidate()
+        aiAnalysisTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
+            self.refreshAIAnalysis()
+        }
+    }
+    
+    func refreshAIAnalysis() {
+        // In a real app, this would call an AI service to analyze the current candles
+        // For now, we'll simulate a comprehensive analysis
+        
+        let currentPrice = self.currentPrice
+        let highPrice = candles.map { $0.high }.max() ?? currentPrice
+        let lowPrice = candles.map { $0.low }.min() ?? currentPrice
+        
+        // Generate support and resistance levels
+        let supportLevels = [
+            PriceLevel(price: currentPrice * 0.98, strength: 0.8, touches: 3, lastTested: Date()),
+            PriceLevel(price: currentPrice * 0.96, strength: 0.6, touches: 2, lastTested: Date().addingTimeInterval(-3600)),
+            PriceLevel(price: currentPrice * 0.94, strength: 0.4, touches: 1, lastTested: Date().addingTimeInterval(-7200))
+        ]
+        
+        let resistanceLevels = [
+            PriceLevel(price: currentPrice * 1.02, strength: 0.7, touches: 4, lastTested: Date()),
+            PriceLevel(price: currentPrice * 1.04, strength: 0.5, touches: 2, lastTested: Date().addingTimeInterval(-1800)),
+            PriceLevel(price: currentPrice * 1.06, strength: 0.3, touches: 1, lastTested: Date().addingTimeInterval(-5400))
+        ]
+        
+        // Generate patterns
+        let patterns = [
+            ChartPattern(
+                type: .triangle,
+                startIndex: max(0, candles.count - 20),
+                endIndex: candles.count - 1,
+                confidence: 0.75,
+                description: "Ascending triangle pattern detected"
+            )
+        ]
+        
+        // Generate AI signals
+        let signals = [
+            AISignal(
+                type: .buy,
+                price: currentPrice * 0.995,
+                confidence: 0.82,
+                reason: "Strong support level with bullish momentum",
+                timestamp: Date()
+            )
+        ]
+        
+        // Generate risk zones
+        let riskZones = [
+            RiskZone(
+                startPrice: currentPrice * 1.05,
+                endPrice: currentPrice * 1.08,
+                riskLevel: .high,
+                reason: "Major resistance cluster"
+            ),
+            RiskZone(
+                startPrice: currentPrice * 0.92,
+                endPrice: currentPrice * 0.95,
+                riskLevel: .medium,
+                reason: "Potential support breakdown zone"
+            )
+        ]
+        
+        // Generate price prediction
+        let prediction = PricePrediction(
+            timeHorizon: 30,
+            predictedPrice: currentPrice * 1.015,
+            upperBound: currentPrice * 1.025,
+            lowerBound: currentPrice * 1.005,
+            confidence: 0.68
+        )
+        
+        // Generate trend analysis
+        let trendAnalysis = TrendAnalysis(
+            shortTerm: .bullish,
+            mediumTerm: .neutral,
+            longTerm: .bullish,
+            strength: 0.72,
+            momentum: 0.65
+        )
+        
+        // Generate market commentary
+        let marketCommentary = """
+        The \(symbol) pair is showing bullish momentum in the short term with price testing resistance at \(String(format: "%.5f", currentPrice * 1.02)). \
+        Strong support has formed at \(String(format: "%.5f", currentPrice * 0.98)) with multiple successful tests. \
+        An ascending triangle pattern suggests potential breakout above current levels. \
+        Risk management recommended above \(String(format: "%.5f", currentPrice * 1.05)) due to major resistance cluster.
+        """
+        
+        let analysis = AIChartAnalysis(
+            patterns: patterns,
+            supportLevels: supportLevels,
+            resistanceLevels: resistanceLevels,
+            predictions: prediction,
+            riskZones: riskZones,
+            signals: signals,
+            trendAnalysis: trendAnalysis,
+            marketCommentary: marketCommentary,
+            timestamp: Date()
+        )
+        
+        aiAnalysis = analysis
     }
     
     private func loadChartData(timeframe: ChartTimeframe = .h1) {
@@ -711,6 +870,7 @@ class ChartViewModel: ObservableObject {
     
     deinit {
         priceUpdateTimer?.invalidate()
+        aiAnalysisTimer?.invalidate()
     }
 }
 
