@@ -54,68 +54,68 @@ struct TradingView: View {
                             .padding(.horizontal)
                             .padding(.top, 8)
                         
-                        // Price Card
-                        PriceCardView(symbol: selectedSymbol)
+                            // Price Card
+                            PriceCardView(symbol: selectedSymbol)
+                                .padding(.horizontal)
+                            
+                            // Quick Trade Buttons
+                            HStack(spacing: 16) {
+                                QuickTradeButton(
+                                    title: "Buy",
+                                    color: Color.Theme.buy,
+                                    action: {
+                                        viewModel.tradeSide = .buy
+                                        showNewTradeSheet = true
+                                    }
+                                )
+                                
+                                QuickTradeButton(
+                                    title: "Sell",
+                                    color: Color.Theme.sell,
+                                    action: {
+                                        viewModel.tradeSide = .sell
+                                        showNewTradeSheet = true
+                                    }
+                                )
+                            }
                             .padding(.horizontal)
                         
-                        // Quick Trade Buttons
-                        HStack(spacing: 16) {
-                            QuickTradeButton(
-                                title: "Buy",
-                                color: Color.Theme.buy,
-                                action: {
-                                    viewModel.tradeSide = .buy
-                                    showNewTradeSheet = true
+                            // Open Positions
+                            if !viewModel.positions.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Open Positions")
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(Color.Theme.text)
+                                        .padding(.horizontal)
+                                    
+                                    ForEach(viewModel.positions) { position in
+                                        PositionCardView(position: position)
+                                            .padding(.horizontal)
+                                    }
                                 }
-                            )
+                            }
                             
-                            QuickTradeButton(
-                                title: "Sell",
-                                color: Color.Theme.sell,
-                                action: {
-                                    viewModel.tradeSide = .sell
-                                    showNewTradeSheet = true
-                                }
-                            )
-                        }
-                        .padding(.horizontal)
-                        
-                        // Open Positions
-                        if !viewModel.positions.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Open Positions")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(Color.Theme.text)
-                                    .padding(.horizontal)
-                                
-                                ForEach(viewModel.positions) { position in
-                                    PositionCardView(position: position)
+                            // Pending Orders
+                            if !viewModel.orders.isEmpty {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    Text("Pending Orders")
+                                        .font(.title3)
+                                        .fontWeight(.semibold)
+                                        .foregroundColor(Color.Theme.text)
                                         .padding(.horizontal)
+                                    
+                                    ForEach(viewModel.orders) { order in
+                                        OrderCardView(order: order)
+                                            .padding(.horizontal)
+                                    }
                                 }
                             }
                         }
-                        
-                        // Pending Orders
-                        if !viewModel.orders.isEmpty {
-                            VStack(alignment: .leading, spacing: 12) {
-                                Text("Pending Orders")
-                                    .font(.title3)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(Color.Theme.text)
-                                    .padding(.horizontal)
-                                
-                                ForEach(viewModel.orders) { order in
-                                    OrderCardView(order: order)
-                                        .padding(.horizontal)
-                                }
-                            }
-                        }
+                        .padding(.vertical)
                     }
-                    .padding(.vertical)
                 }
             }
-            .background(Color.Theme.background)
             .navigationTitle("Trading")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -124,7 +124,7 @@ struct TradingView: View {
                         ChartPresentationManager.shared.presentChart(for: selectedSymbol)
                     }) {
                         Image(systemName: "chart.line.uptrend.xyaxis")
-                            .foregroundColor(Color.blue)
+                            .foregroundColor(Color.Theme.accent)
                     }
                 }
             }
@@ -208,11 +208,11 @@ struct PriceCardView: View {
                         Text(symbol)
                             .font(.title2)
                             .fontWeight(.bold)
-                            .foregroundColor(themeManager.currentTheme.textColor)
+                            .foregroundColor(Color.Theme.text)
                         
                         Text(symbolDescription)
                             .font(.caption)
-                            .foregroundColor(themeManager.currentTheme.secondaryTextColor)
+                            .foregroundColor(Color.Theme.textSecondary)
                     }
                     
                     Spacer()
