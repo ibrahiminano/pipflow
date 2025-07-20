@@ -10,37 +10,49 @@ import Combine
 
 struct TradingView: View {
     @StateObject private var viewModel = TradingViewModel()
+    @EnvironmentObject var themeManager: ThemeManager
     @State private var selectedSymbol = "EURUSD"
     @State private var showNewTradeSheet = false
     
     var body: some View {
         NavigationView {
-            VStack(spacing: 0) {
-                // Symbol Selector
-                SymbolSelectorView(selectedSymbol: $selectedSymbol)
-                    .padding(.horizontal)
-                    .padding(.vertical, 8)
+            ZStack {
+                Color.Theme.background
+                    .ignoresSafeArea()
                 
-                ScrollView {
-                    VStack(spacing: 16) {
-                        // Chart Button - Made more prominent
-                        Button(action: {
-                            ChartPresentationManager.shared.presentChart(for: selectedSymbol)
-                        }) {
-                            HStack(spacing: 12) {
-                                Image(systemName: "chart.line.uptrend.xyaxis")
-                                    .font(.title2)
-                                Text("View Chart")
-                                    .font(.headline)
-                            }
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 50)
-                            .background(Color.blue)
-                            .cornerRadius(12)
-                        }
+                VStack(spacing: 0) {
+                    // Symbol Selector
+                    SymbolSelectorView(selectedSymbol: $selectedSymbol)
                         .padding(.horizontal)
-                        .padding(.top, 8)
+                        .padding(.vertical, 8)
+                    
+                    ScrollView {
+                        VStack(spacing: .sectionSpacing) {
+                            // Chart Button - Made more prominent
+                            Button(action: {
+                                ChartPresentationManager.shared.presentChart(for: selectedSymbol)
+                            }) {
+                                HStack(spacing: 12) {
+                                    Image(systemName: "chart.line.uptrend.xyaxis")
+                                        .font(.title2)
+                                    Text("View Chart")
+                                        .font(.headline)
+                                }
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 54)
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color.Theme.gradientStart, Color.Theme.gradientEnd],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .cornerRadius(.cornerRadius)
+                                .shadow(color: Color.Theme.shadow, radius: 4, x: 0, y: 2)
+                            }
+                            .padding(.horizontal)
+                            .padding(.top, 8)
                         
                         // Price Card
                         PriceCardView(symbol: selectedSymbol)
