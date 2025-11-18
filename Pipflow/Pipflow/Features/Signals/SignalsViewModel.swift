@@ -8,23 +8,38 @@
 import Foundation
 import Combine
 
+@MainActor
 class SignalsViewModel: ObservableObject {
     @Published var signals: [Signal] = []
+    @Published var activePrompts: [TradingPrompt] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
     
     private var cancellables = Set<AnyCancellable>()
     private let aiSignalService = AISignalService.shared
     private let metaAPIManager = MetaAPIManager.shared
+    private let promptEngine = PromptTradingEngine.shared
     
     init() {
         loadMockSignals()
+        startListening()
+        
+        // Immediately set the active prompts from the prompt engine
+        activePrompts = promptEngine.activePrompts
     }
     
     func startListening() {
         aiSignalService.$activeSignals
             .sink { [weak self] signals in
                 self?.signals = signals.sorted(by: { $0.generatedAt > $1.generatedAt })
+            }
+            .store(in: &cancellables)
+        
+        promptEngine.$activePrompts
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] prompts in
+                print("SignalsViewModel received prompts update: \(prompts.count) prompts")
+                self?.activePrompts = prompts
             }
             .store(in: &cancellables)
     }

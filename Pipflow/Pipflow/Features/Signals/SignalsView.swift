@@ -12,6 +12,10 @@ struct SignalsView: View {
     @EnvironmentObject var themeManager: ThemeManager
     @State private var selectedFilter: SignalFilter = .all
     @State private var showGenerateSignal = false
+    @State private var showPromptBuilder = false
+    @State private var showMyStrategies = false
+    @State private var showAIDashboard = false
+    @State private var showSafetyControls = false
     
     var body: some View {
         NavigationView {
@@ -20,11 +24,20 @@ struct SignalsView: View {
                     .ignoresSafeArea()
                 
                 VStack(spacing: 0) {
+                    // AI Actions Bar
+                    AIActionsBar(
+                        showPromptBuilder: $showPromptBuilder,
+                        showGenerateSignal: $showGenerateSignal,
+                        showAIDashboard: $showAIDashboard,
+                        showSafetyControls: $showSafetyControls,
+                        theme: themeManager.currentTheme
+                    )
+                    
                     // Filter Bar
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(SignalFilter.allCases, id: \.self) { filter in
-                                FilterChip(
+                                SignalFilterChip(
                                     title: filter.title,
                                     isSelected: selectedFilter == filter,
                                     theme: themeManager.currentTheme
@@ -44,13 +57,50 @@ struct SignalsView: View {
                             .progressViewStyle(CircularProgressViewStyle(tint: themeManager.currentTheme.accentColor))
                             .scaleEffect(1.5)
                         Spacer()
-                    } else if filteredSignals.isEmpty {
+                    } else if filteredSignals.isEmpty && viewModel.activePrompts.isEmpty {
                         Spacer()
                         EmptySignalsView(theme: themeManager.currentTheme)
                         Spacer()
                     } else {
                         ScrollView {
                             LazyVStack(spacing: 16) {
+                                // Debug
+                                Text("DEBUG: \(viewModel.activePrompts.count) active prompts")
+                                    .foregroundColor(.red)
+                                
+                                // Active Strategies Section
+                                if !viewModel.activePrompts.isEmpty {
+                                    VStack(alignment: .leading, spacing: 12) {
+                                        HStack {
+                                            Text("Active AI Strategies")
+                                                .font(.headline)
+                                                .foregroundColor(themeManager.currentTheme.textColor)
+                                            
+                                            Spacer()
+                                            
+                                            Button(action: { showMyStrategies = true }) {
+                                                Text("View All")
+                                                    .font(.caption)
+                                                    .foregroundColor(themeManager.currentTheme.accentColor)
+                                            }
+                                        }
+                                        
+                                        ForEach(viewModel.activePrompts.prefix(3)) { prompt in
+                                            ActiveStrategyCard(prompt: prompt, theme: themeManager.currentTheme)
+                                        }
+                                    }
+                                    .padding(.bottom, 20)
+                                }
+                                
+                                // Signals Section
+                                if !filteredSignals.isEmpty {
+                                    Text("Trading Signals")
+                                        .font(.headline)
+                                        .foregroundColor(themeManager.currentTheme.textColor)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.bottom, 8)
+                                }
+                                
                                 ForEach(filteredSignals) { signal in
                                     SignalCard(
                                         signal: signal,
@@ -70,12 +120,25 @@ struct SignalsView: View {
                     }
                 }
             }
-            .navigationTitle("AI Signals")
+            .navigationBarHidden(true)
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: { showGenerateSignal = true }) {
-                        Image(systemName: "sparkles")
+                    Menu {
+                        Button(action: { showAIDashboard = true }) {
+                            Label("AI Dashboard", systemImage: "brain")
+                        }
+                        Button(action: { showPromptBuilder = true }) {
+                            Label("AI Prompt Builder", systemImage: "sparkles.rectangle.stack")
+                        }
+                        Button(action: { showMyStrategies = true }) {
+                            Label("My Strategies", systemImage: "list.bullet.rectangle")
+                        }
+                        Button(action: { showGenerateSignal = true }) {
+                            Label("Generate Signal", systemImage: "sparkles")
+                        }
+                    } label: {
+                        Image(systemName: "plus.circle.fill")
                             .foregroundColor(themeManager.currentTheme.accentColor)
                             .font(.system(size: 18, weight: .semibold))
                     }
@@ -86,8 +149,34 @@ struct SignalsView: View {
             GenerateSignalView()
                 .environmentObject(themeManager)
         }
+        .sheet(isPresented: $showPromptBuilder) {
+            EnhancedPromptBuilderView()
+                .environmentObject(themeManager)
+        }
+        .sheet(isPresented: $showMyStrategies) {
+            PromptPerformanceView()
+        }
+        .sheet(isPresented: $showAIDashboard) {
+            NavigationView {
+                AIStrategyDashboard()
+                    .environmentObject(themeManager)
+                    .toolbar {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button("Done") {
+                                showAIDashboard = false
+                            }
+                        }
+                    }
+            }
+        }
+        .sheet(isPresented: $showSafetyControls) {
+            SafetyControlView()
+                .environmentObject(themeManager)
+        }
         .onAppear {
-            viewModel.startListening()
+            print("DEBUG: Active prompts count on appear: \(viewModel.activePrompts.count)")
+            print("DEBUG: Signals count on appear: \(viewModel.signals.count)")
+            print("DEBUG: PromptTradingEngine active prompts: \(PromptTradingEngine.shared.activePrompts.count)")
         }
     }
     
@@ -129,7 +218,7 @@ enum SignalFilter: String, CaseIterable {
 
 // MARK: - Filter Chip
 
-struct FilterChip: View {
+struct SignalFilterChip: View {
     let title: String
     let isSelected: Bool
     let theme: Theme
@@ -397,6 +486,162 @@ struct EmptySignalsView: View {
                 .multilineTextAlignment(.center)
         }
         .padding()
+    }
+}
+
+// MARK: - Active Strategy Card
+
+struct ActiveStrategyCard: View {
+    let prompt: TradingPrompt
+    let theme: Theme
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "sparkles.rectangle.stack")
+                    .foregroundColor(theme.accentColor)
+                    .font(.system(size: 20))
+                
+                Text(prompt.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(theme.textColor)
+                
+                Spacer()
+                
+                Text(prompt.isActive ? "Active" : "Inactive")
+                    .font(.caption)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(statusColor.opacity(0.2))
+                    .foregroundColor(statusColor)
+                    .cornerRadius(6)
+            }
+            
+            Text(prompt.prompt)
+                .font(.system(size: 14))
+                .foregroundColor(theme.textColor.opacity(0.8))
+                .lineLimit(2)
+            
+            HStack {
+                Label("Strategy", systemImage: "checklist")
+                    .font(.caption)
+                    .foregroundColor(theme.textColor.opacity(0.6))
+                
+                Spacer()
+                
+                if let performance = prompt.performanceMetrics {
+                    Label("\(performance.totalTrades) trades", systemImage: "chart.line.uptrend.xyaxis")
+                        .font(.caption)
+                        .foregroundColor(theme.textColor.opacity(0.6))
+                }
+            }
+        }
+        .padding()
+        .background(theme.secondaryBackgroundColor)
+        .cornerRadius(16)
+        .shadow(color: theme.shadowColor, radius: 8, x: 0, y: 4)
+    }
+    
+    private var statusColor: Color {
+        return prompt.isActive ? .green : .gray
+    }
+}
+
+// MARK: - AI Actions Bar
+
+struct AIActionsBar: View {
+    @Binding var showPromptBuilder: Bool
+    @Binding var showGenerateSignal: Bool
+    @Binding var showAIDashboard: Bool
+    @Binding var showSafetyControls: Bool
+    let theme: Theme
+    
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                // AI Dashboard
+                Button(action: { showAIDashboard = true }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "brain")
+                            .font(.system(size: 20))
+                        Text("Dashboard")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(theme.accentColor)
+                    .frame(width: 80, height: 60)
+                    .background(theme.accentColor.opacity(0.1))
+                    .cornerRadius(12)
+                }
+                
+                // AI Prompt Builder
+                Button(action: { showPromptBuilder = true }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "sparkles.rectangle.stack")
+                            .font(.system(size: 18))
+                        
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("AI Strategy Builder")
+                                .font(.system(size: 14, weight: .semibold))
+                            Text("Create complex strategies")
+                                .font(.caption2)
+                                .opacity(0.7)
+                        }
+                        
+                        Spacer()
+                        
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12))
+                            .opacity(0.5)
+                    }
+                    .foregroundColor(.white)
+                    .padding()
+                    .background(
+                        LinearGradient(
+                            gradient: Gradient(colors: [theme.accentColor, theme.accentColor.opacity(0.8)]),
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .cornerRadius(12)
+                    .shadow(color: theme.accentColor.opacity(0.3), radius: 8, x: 0, y: 4)
+                }
+                
+                // Quick Signal Generator
+                Button(action: { showGenerateSignal = true }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 20))
+                        Text("Quick Signal")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(theme.accentColor)
+                    .frame(width: 80, height: 60)
+                    .background(theme.accentColor.opacity(0.1))
+                    .cornerRadius(12)
+                }
+                
+                // Safety Controls
+                Button(action: { 
+                    print("DEBUG: Safety button tapped")
+                    showSafetyControls = true 
+                    print("DEBUG: showSafetyControls set to: \(showSafetyControls)")
+                }) {
+                    VStack(spacing: 4) {
+                        Image(systemName: "shield.checkered")
+                            .font(.system(size: 20))
+                        Text("Safety")
+                            .font(.caption2)
+                    }
+                    .foregroundColor(.orange)
+                    .frame(width: 80, height: 60)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(12)
+                }
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 12)
+        .background(theme.backgroundColor)
     }
 }
 

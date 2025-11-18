@@ -264,19 +264,19 @@ struct CopyTradingSettingsView: View {
     }
     
     private func startCopyTrading() {
-        let settings = CopyTradingSettings(
-            maxInvestment: Double(maxInvestment) ?? 1000,
-            maxRiskPerTrade: Double(maxRiskPerTrade) ?? 2,
-            copyRatio: copyRatio,
-            stopLossEnabled: stopLossEnabled,
-            maxDailyLoss: stopLossEnabled ? Double(maxDailyLoss) : nil,
-            allowedSymbols: nil,
-            excludedSymbols: nil,
-            copyOpenTrades: copyOpenTrades,
-            reverseCopy: reverseCopy
+        let config = CopyTradingConfig(
+            allocatedAmount: Double(maxInvestment) ?? 1000,
+            maxPositions: 10,
+            riskLevel: .medium,
+            copyStopLoss: stopLossEnabled,
+            copyTakeProfit: true,
+            proportionalSizing: true,
+            maxDrawdown: stopLossEnabled ? (Double(maxDailyLoss) ?? 10) / 100 : 0.10,
+            stopLossPercent: 0.02,
+            takeProfitPercent: 0.04
         )
         
-        socialService.startCopyTrading(trader: trader, settings: settings)
+        socialService.startCopyTrading(trader: trader, settings: config)
         dismiss()
     }
 }

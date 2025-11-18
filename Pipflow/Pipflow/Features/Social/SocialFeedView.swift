@@ -10,73 +10,200 @@ import SwiftUI
 struct SocialFeedView: View {
     @StateObject private var socialService = SocialTradingService.shared
     @EnvironmentObject var themeManager: ThemeManager
-    @State private var selectedFilter: TraderFilter = .all
+    @State private var selectedTab = 0
     @State private var showingTraderDetail = false
     @State private var selectedTrader: Trader?
+    @State private var showingCopyTrading = false
     
     var body: some View {
         NavigationView {
-            ZStack {
-                themeManager.currentTheme.backgroundColor
-                    .ignoresSafeArea()
-                
-                VStack(spacing: 0) {
-                    // Top Traders Section
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Text("Top Traders")
-                                .font(.title3)
-                                .fontWeight(.bold)
-                                .foregroundColor(themeManager.currentTheme.textColor)
-                            
-                            Spacer()
-                            
-                            NavigationLink(destination: TopTradersView()) {
-                                Text("See All")
-                                    .font(.footnote)
-                                    .foregroundColor(themeManager.currentTheme.accentColor)
-                            }
-                        }
-                        .padding(.horizontal)
+            VStack(spacing: 0) {
+                // Tab Selection
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 20) {
+                        SocialTabButton(
+                            title: "Feed",
+                            icon: "house.fill",
+                            isSelected: selectedTab == 0,
+                            action: { selectedTab = 0 }
+                        )
                         
-                        // Horizontal scroll of top traders
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 12) {
-                                ForEach(socialService.topTraders.prefix(5)) { trader in
-                                    TraderCardCompact(trader: trader)
-                                        .onTapGesture {
-                                            selectedTrader = trader
-                                            showingTraderDetail = true
-                                        }
-                                }
-                            }
-                            .padding(.horizontal)
-                        }
+                        SocialTabButton(
+                            title: "Top Traders",
+                            icon: "chart.line.uptrend.xyaxis",
+                            isSelected: selectedTab == 1,
+                            action: { selectedTab = 1 }
+                        )
+                        
+                        SocialTabButton(
+                            title: "Community",
+                            icon: "bubble.left.and.bubble.right.fill",
+                            isSelected: selectedTab == 2,
+                            action: { selectedTab = 2 }
+                        )
+                        
+                        SocialTabButton(
+                            title: "Messages",
+                            icon: "envelope.fill",
+                            isSelected: selectedTab == 3,
+                            action: { selectedTab = 3 }
+                        )
                     }
-                    .padding(.vertical)
+                    .padding(.horizontal)
+                }
+                .padding(.vertical, 8)
+                .background(themeManager.currentTheme.secondaryBackgroundColor)
+                
+                // Content based on selected tab
+                TabView(selection: $selectedTab) {
+                    // Social Feed Tab
+                    SocialFeedContent(
+                        socialService: socialService,
+                        showingTraderDetail: $showingTraderDetail,
+                        selectedTrader: $selectedTrader
+                    )
+                    .tag(0)
                     
-                    Divider()
-                        .background(themeManager.currentTheme.separatorColor)
+                    // Top Traders Tab
+                    TopTradersView()
+                        .tag(1)
                     
-                    // Social Feed
-                    ScrollView {
-                        LazyVStack(spacing: 0) {
-                            ForEach(socialService.socialFeed) { post in
-                                SocialPostView(post: post)
-                                    .padding(.horizontal)
-                                    .padding(.vertical, 8)
-                                
-                                Divider()
-                                    .background(themeManager.currentTheme.separatorColor)
+                    // Community Forum Tab
+                    CommunityForumView()
+                        .tag(2)
+                    
+                    // Chat/Messages Tab
+                    ChatView()
+                        .tag(3)
+                }
+                .tabViewStyle(.page(indexDisplayMode: .never))
+            }
+            .navigationBarHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    if selectedTab == 0 || selectedTab == 1 {
+                        Button(action: { showingCopyTrading = true }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                Text("Copy")
                             }
+                            .foregroundColor(themeManager.currentTheme.accentColor)
                         }
                     }
                 }
             }
-            .navigationTitle("Social")
-            .navigationBarTitleDisplayMode(.large)
             .sheet(item: $selectedTrader) { trader in
                 TraderDetailView(trader: trader)
+            }
+            .sheet(isPresented: $showingCopyTrading) {
+                CopyTradingView()
+            }
+        }
+    }
+    
+    private var tabTitle: String {
+        switch selectedTab {
+        case 0: return "Social Feed"
+        case 1: return "Top Traders"
+        case 2: return "Community"
+        case 3: return "Messages"
+        default: return "Social"
+        }
+    }
+}
+
+// MARK: - Social Tab Button
+struct SocialTabButton: View {
+    let title: String
+    let icon: String
+    let isSelected: Bool
+    let action: () -> Void
+    @EnvironmentObject var themeManager: ThemeManager
+    
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 20))
+                
+                Text(title)
+                    .font(.caption)
+                    .fontWeight(.medium)
+            }
+            .foregroundColor(isSelected ? themeManager.currentTheme.accentColor : themeManager.currentTheme.secondaryTextColor)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 16)
+            .background(
+                isSelected ? themeManager.currentTheme.accentColor.opacity(0.1) : Color.clear
+            )
+            .cornerRadius(20)
+        }
+    }
+}
+
+// MARK: - Social Feed Content
+struct SocialFeedContent: View {
+    @ObservedObject var socialService: SocialTradingService
+    @Binding var showingTraderDetail: Bool
+    @Binding var selectedTrader: Trader?
+    @EnvironmentObject var themeManager: ThemeManager
+    
+    var body: some View {
+        ZStack {
+            themeManager.currentTheme.backgroundColor
+                .ignoresSafeArea()
+            
+            VStack(spacing: 0) {
+                // Top Traders Section
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Text("Top Traders")
+                            .font(.title3)
+                            .fontWeight(.bold)
+                            .foregroundColor(themeManager.currentTheme.textColor)
+                        
+                        Spacer()
+                        
+                        NavigationLink(destination: TopTradersView()) {
+                            Text("See All")
+                                .font(.footnote)
+                                .foregroundColor(themeManager.currentTheme.accentColor)
+                        }
+                    }
+                    .padding(.horizontal)
+                    
+                    // Horizontal scroll of top traders
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(socialService.topTraders.prefix(5)) { trader in
+                                TraderCardCompact(trader: trader)
+                                    .onTapGesture {
+                                        selectedTrader = trader
+                                        showingTraderDetail = true
+                                    }
+                            }
+                        }
+                        .padding(.horizontal)
+                    }
+                }
+                .padding(.vertical)
+                
+                Divider()
+                    .background(themeManager.currentTheme.separatorColor)
+                
+                // Social Feed
+                ScrollView {
+                    LazyVStack(spacing: 0) {
+                        ForEach(socialService.socialFeed) { post in
+                            SocialPostView(post: post)
+                                .padding(.horizontal)
+                                .padding(.vertical, 8)
+                            
+                            Divider()
+                                .background(themeManager.currentTheme.separatorColor)
+                        }
+                    }
+                }
             }
         }
     }

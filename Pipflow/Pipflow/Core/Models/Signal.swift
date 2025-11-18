@@ -44,6 +44,19 @@ struct Signal: Codable, Identifiable {
     var potentialLoss: Decimal {
         abs(stopLoss - entry)
     }
+    
+    // Computed properties for backward compatibility
+    var takeProfit: Decimal? {
+        takeProfits.first?.price
+    }
+    
+    var reasoning: String {
+        rationale
+    }
+    
+    var pair: String {
+        symbol
+    }
 }
 
 struct TakeProfit: Codable {

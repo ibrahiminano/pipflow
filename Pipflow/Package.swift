@@ -27,11 +27,17 @@ let package = Package(
         // Charts library for trading charts
         .package(url: "https://github.com/danielgindi/Charts", from: "5.0.0"),
         
+        // TradingView Lightweight Charts iOS
+        .package(url: "https://github.com/tradingview/LightweightChartsIOS", from: "4.0.0"),
+        
         // Lottie for animations
         .package(url: "https://github.com/airbnb/lottie-ios", from: "4.3.0"),
         
         // SwiftUI components
         .package(url: "https://github.com/SDWebImage/SDWebImageSwiftUI", from: "2.2.0")
+        
+        // OpenAI SDK for ChatGPT integration - TODO: Add when needed
+        // .package(url: "https://github.com/MacPaw/OpenAI.git", branch: "main")
     ],
     targets: [
         .target(
@@ -40,8 +46,10 @@ let package = Package(
                 .product(name: "Supabase", package: "supabase-swift"),
                 .product(name: "KeychainSwift", package: "keychain-swift"),
                 .product(name: "DGCharts", package: "Charts"),
+                .product(name: "LightweightCharts", package: "LightweightChartsIOS"),
                 .product(name: "Lottie", package: "lottie-ios"),
                 .product(name: "SDWebImageSwiftUI", package: "SDWebImageSwiftUI")
+                // .product(name: "OpenAI", package: "OpenAI")
             ],
             path: "Sources"
         ),

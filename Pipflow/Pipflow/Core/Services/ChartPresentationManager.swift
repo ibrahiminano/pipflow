@@ -17,8 +17,10 @@ class ChartPresentationManager: ObservableObject {
     private init() {}
     
     func presentChart(for symbol: String) {
+        print("ChartPresentationManager: presentChart called for symbol: \(symbol)")
         selectedSymbol = symbol
         showChart = true
+        print("ChartPresentationManager: showChart set to \(showChart)")
     }
     
     func dismissChart() {

@@ -217,7 +217,7 @@ class MetaAPIManager: ObservableObject {
         
         let subscription: [String: Any] = [
             "type": "subscribe",
-            "symbols": symbols
+            "symbols": symbols as Any
         ]
         
         if let data = try? JSONSerialization.data(withJSONObject: subscription) {

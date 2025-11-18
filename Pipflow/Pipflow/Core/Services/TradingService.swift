@@ -21,6 +21,8 @@ class TradingService: ObservableObject {
     @Published var isConnecting = false
     
     private let metaAPIService = MetaAPIService.shared
+    private let webSocketService = MetaAPIWebSocketService.shared
+    private let positionTrackingService = PositionTrackingService.shared
     private var cancellables = Set<AnyCancellable>()
     
     enum ConnectionStatus {
@@ -50,8 +52,41 @@ class TradingService: ObservableObject {
             }
             .store(in: &cancellables)
         
-        metaAPIService.$positions
-            .assign(to: &$openPositions)
+        // Subscribe to WebSocket account updates for real-time data
+        webSocketService.$accountInfo
+            .compactMap { $0 }
+            .sink { [weak self] info in
+                self?.accountBalance = info.balance
+                self?.accountEquity = info.equity
+            }
+            .store(in: &cancellables)
+        
+        // Subscribe to position tracking service for enhanced positions
+        positionTrackingService.$trackedPositions
+            .sink { [weak self] trackedPositions in
+                self?.openPositions = trackedPositions
+            }
+            .store(in: &cancellables)
+        
+        // Monitor WebSocket connection state
+        webSocketService.$connectionState
+            .sink { [weak self] state in
+                switch state {
+                case .connected:
+                    self?.connectionStatus = .connected
+                case .connecting, .reconnecting:
+                    self?.connectionStatus = .connecting
+                case .disconnected:
+                    if self?.isConnecting == false {
+                        self?.connectionStatus = .disconnected
+                    }
+                case .failed(let error):
+                    self?.connectionStatus = .error(error.localizedDescription)
+                default:
+                    break
+                }
+            }
+            .store(in: &cancellables)
     }
     
     private func loadSavedAccounts() {
@@ -94,6 +129,12 @@ class TradingService: ObservableObject {
                 accountToken: "demo-token" // In production, get actual token from MetaAPI
             )
             
+            // Connect WebSocket for real-time updates
+            webSocketService.connect(
+                authToken: "demo-token", // In production, use actual token
+                accountId: credentials.accountId
+            )
+            
             // Add to connected accounts
             connectedAccounts.append(account)
             activeAccount = account
@@ -101,7 +142,9 @@ class TradingService: ObservableObject {
             // Save accounts
             saveAccounts()
             
-            connectionStatus = .connected
+            // Wait for WebSocket connection
+            try await Task.sleep(nanoseconds: 1_000_000_000) // 1 second
+            
             isConnecting = false
             
             // Start fetching account data
@@ -116,6 +159,8 @@ class TradingService: ObservableObject {
     
     func disconnectAccount(_ account: TradingAccount) {
         metaAPIService.disconnect()
+        webSocketService.disconnect()
+        
         connectedAccounts.removeAll { $0.id == account.id }
         
         if activeAccount?.id == account.id {
@@ -202,6 +247,25 @@ class TradingService: ObservableObject {
             stopLoss: stopLoss,
             takeProfit: takeProfit
         )
+    }
+    
+    // Execute trade using TradeExecutionService
+    func executeTrade(symbol: String, side: TradeSide, volume: Double, stopLoss: Double? = nil, takeProfit: Double? = nil, comment: String? = nil) async throws {
+        guard connectionStatus.isConnected else {
+            throw TradingError.notConnected
+        }
+        
+        let request = ExecutionTradeRequest(
+            symbol: symbol,
+            side: side,
+            volume: volume,
+            stopLoss: stopLoss,
+            takeProfit: takeProfit,
+            comment: comment,
+            magicNumber: nil
+        )
+        
+        _ = try await TradeExecutionService.shared.executeTrade(request)
     }
 }
 

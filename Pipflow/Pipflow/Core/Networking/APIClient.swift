@@ -16,6 +16,7 @@ enum APIError: LocalizedError {
     case networkError(Error)
     case unauthorized
     case rateLimited
+    case timeout
     case custom(String)
     
     var errorDescription: String? {
@@ -34,6 +35,8 @@ enum APIError: LocalizedError {
             return "Unauthorized access"
         case .rateLimited:
             return "Rate limit exceeded"
+        case .timeout:
+            return "Request timed out"
         case .custom(let message):
             return message
         }

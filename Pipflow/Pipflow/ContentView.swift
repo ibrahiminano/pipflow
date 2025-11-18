@@ -9,88 +9,52 @@ import SwiftUI
 import Combine
 
 struct ContentView: View {
-    @State private var selectedTab = 0 // Default to Dashboard tab
-    @EnvironmentObject var themeManager: ThemeManager
+    @StateObject private var uiStyleManager = UIStyleManager.shared
+    @StateObject private var themeManager = ThemeManager()
     @StateObject private var chartManager = ChartPresentationManager.shared
+    @State private var selectedTab = 0
     
     var body: some View {
         TabView(selection: $selectedTab) {
             DashboardView()
                 .tabItem {
-                    Label("Dashboard", systemImage: "chart.line.uptrend.xyaxis")
+                    Label("Home", systemImage: "house.fill")
                 }
                 .tag(0)
             
-            MarketTabView()
+            AIDashboard()
                 .tabItem {
-                    Label("Market", systemImage: "chart.bar.xaxis")
+                    Label("AI", systemImage: "brain")
                 }
                 .tag(1)
             
-            TradingTabView()
+            TradingView()
                 .tabItem {
-                    Label("Trade", systemImage: "arrow.up.arrow.down")
+                    Label("Trade", systemImage: "chart.line.uptrend.xyaxis")
                 }
                 .tag(2)
             
-            SocialTabView()
+            MarketView()
                 .tabItem {
-                    Label("Social", systemImage: "person.3.fill")
+                    Label("Market", systemImage: "chart.bar.xaxis")
                 }
                 .tag(3)
             
-            SignalsTabView()
+            ModernSocialHub()
                 .tabItem {
-                    Label("Signals", systemImage: "sparkles")
+                    Label("Social", systemImage: "person.3.fill")
                 }
                 .tag(4)
-            
-            ProfileTabView()
-                .tabItem {
-                    Label("Profile", systemImage: "person.crop.circle")
-                }
-                .tag(5)
         }
-        .accentColor(themeManager.currentTheme.accentColor)
-        .fullScreenCover(isPresented: $chartManager.showChart) {
-            ChartView(symbol: chartManager.selectedSymbol)
-                .environmentObject(themeManager)
-        }
-    }
-}
-
-// Placeholder views for tabs
-struct MarketTabView: View {
-    var body: some View {
-        MarketWatchView()
-    }
-}
-
-struct TradingTabView: View {
-    var body: some View {
-        TradingView()
-    }
-}
-
-struct SocialTabView: View {
-    var body: some View {
-        SocialFeedView()
-    }
-}
-
-struct SignalsTabView: View {
-    var body: some View {
-        SignalsView()
-    }
-}
-
-struct ProfileTabView: View {
-    var body: some View {
-        SettingsView()
+        .preferredColorScheme(.dark)
+        .environmentObject(themeManager)
+        .environmentObject(uiStyleManager)
+        .environment(\.uiStyle, uiStyleManager.currentStyle)
     }
 }
 
 #Preview {
     ContentView()
         .environmentObject(ThemeManager())
+        .environmentObject(AuthService())
 }

@@ -7,6 +7,7 @@
 
 import Foundation
 
+
 struct Trade: Codable, Identifiable {
     let id: UUID
     let accountId: UUID

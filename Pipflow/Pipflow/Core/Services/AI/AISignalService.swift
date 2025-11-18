@@ -202,7 +202,7 @@ class OpenAIProvider: AIProviderProtocol {
         
         return URLSession.shared.dataTaskPublisher(for: urlRequest)
             .map(\.data)
-            .decode(type: OpenAIResponse.self, decoder: JSONDecoder())
+            .decode(type: OpenAISignalResponse.self, decoder: JSONDecoder())
             .tryMap { response in
                 guard let content = response.choices.first?.message.content,
                       let data = content.data(using: .utf8),
@@ -217,18 +217,25 @@ class OpenAIProvider: AIProviderProtocol {
     
     private var systemPrompt: String {
         """
-        You are an expert forex and crypto trading analyst. Analyze market data and provide trading signals with the following JSON structure:
+        You are an expert forex and crypto trading analyst with 20+ years of experience. Analyze market data and provide trading signals with the following JSON structure:
         {
             "action": "BUY" or "SELL" or "HOLD",
-            "entry": number,
-            "stopLoss": number,
-            "takeProfit": number,
-            "confidence": number (0-1),
-            "reasoning": "string explaining the analysis",
-            "risks": ["array of risk factors"]
+            "entry": number (exact entry price),
+            "stopLoss": number (conservative stop loss, typically 1-2% risk),
+            "takeProfit": number (realistic target, typically 1.5-3x risk),
+            "confidence": number (0-1, where 0.7+ is high confidence),
+            "reasoning": "detailed explanation including technical analysis, market structure, and key levels",
+            "risks": ["specific risk factors for this trade"]
         }
         
-        Consider technical indicators, market sentiment, and risk management. Be conservative with stop losses.
+        Guidelines:
+        1. Only suggest BUY/SELL when there's a clear edge with good risk/reward
+        2. Consider market structure, trend, momentum, and volume
+        3. Factor in support/resistance levels and key psychological prices
+        4. Account for spread and slippage in your calculations
+        5. Be conservative - it's better to miss a trade than take a bad one
+        6. Provide specific, actionable reasoning that traders can verify
+        7. List concrete risks, not generic warnings
         """
     }
     
@@ -369,25 +376,30 @@ class ClaudeProvider: AIProviderProtocol {
     
     private var systemPrompt: String {
         """
-        You are an expert forex and crypto trading analyst. Analyze market data and provide trading signals.
+        You are an expert forex and crypto trading analyst with 20+ years of experience. Analyze market data and provide trading signals.
         
         Return your analysis in this exact JSON format:
         {
             "action": "BUY" or "SELL" or "HOLD",
-            "entry": number,
-            "stopLoss": number,
-            "takeProfit": number,
-            "confidence": number between 0 and 1,
-            "reasoning": "detailed explanation of your analysis",
-            "risks": ["list of potential risks"]
+            "entry": number (exact entry price),
+            "stopLoss": number (conservative stop loss, typically 1-2% risk),
+            "takeProfit": number (realistic target, typically 1.5-3x risk),
+            "confidence": number (0-1, where 0.7+ is high confidence),
+            "reasoning": "detailed explanation including technical analysis, market structure, and key levels",
+            "risks": ["specific risk factors for this trade"]
         }
         
         Guidelines:
-        - Use conservative stop losses (1-2% risk)
-        - Set realistic take profit targets (1.5-3x risk)
-        - Consider market volatility and spread
-        - Factor in support/resistance levels
-        - Account for trend direction and momentum
+        1. Only suggest BUY/SELL when there's a clear edge with good risk/reward
+        2. Consider market structure, trend, momentum, and volume
+        3. Factor in support/resistance levels and key psychological prices
+        4. Account for spread and slippage in your calculations
+        5. Be conservative - it's better to miss a trade than take a bad one
+        6. Provide specific, actionable reasoning that traders can verify
+        7. List concrete risks, not generic warnings
+        8. If RSI > 70 or < 30, mention overbought/oversold conditions
+        9. Consider MACD crossovers and divergences
+        10. Note if price is near moving averages for potential support/resistance
         """
     }
     
@@ -479,7 +491,7 @@ class ClaudeProvider: AIProviderProtocol {
 
 // MARK: - Response Models
 
-private struct OpenAIResponse: Decodable {
+private struct OpenAISignalResponse: Decodable {
     let choices: [Choice]
     
     struct Choice: Decodable {

@@ -65,6 +65,7 @@ class SocialTradingService: ObservableObject {
                 performance: nil,
                 likes: 0,
                 comments: 0,
+                shares: 0,
                 isLiked: false
             )
             socialFeed.insert(post, at: 0)
@@ -75,9 +76,14 @@ class SocialTradingService: ObservableObject {
         followedTraders.removeAll { $0.id == trader.id }
     }
     
-    func startCopyTrading(trader: Trader, settings: CopyTradingSettings) {
-        // In production, this would connect to copy trading engine
-        print("Starting copy trading for \(trader.username) with settings: \(settings)")
+    func startCopyTrading(trader: Trader, settings: CopyTradingConfig) {
+        // Start copy trading with the trade mirroring service
+        Task { @MainActor in
+            TradeMirroringService.shared.startMirroring(
+                traderId: trader.id,
+                settings: settings
+            )
+        }
         
         let post = SocialPost(
             id: UUID().uuidString,
@@ -91,13 +97,17 @@ class SocialTradingService: ObservableObject {
             performance: nil,
             likes: 0,
             comments: 0,
+            shares: 0,
             isLiked: false
         )
         socialFeed.insert(post, at: 0)
     }
     
     func stopCopyTrading(trader: Trader) {
-        print("Stopping copy trading for \(trader.username)")
+        // Stop copy trading with the trade mirroring service
+        Task { @MainActor in
+            TradeMirroringService.shared.stopMirroring(traderId: trader.id)
+        }
     }
     
     // MARK: - Social Feed
@@ -427,6 +437,7 @@ class SocialTradingService: ObservableObject {
             performance: performance,
             likes: Int.random(in: 0...500),
             comments: Int.random(in: 0...50),
+            shares: Int.random(in: 0...100),
             isLiked: Bool.random()
         )
     }
@@ -446,7 +457,14 @@ struct SocialPost: Identifiable {
     let performance: SocialPerformanceInfo?
     var likes: Int
     var comments: Int
+    var shares: Int
     var isLiked: Bool
+    
+    var timeAgo: String {
+        let formatter = RelativeDateTimeFormatter()
+        formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: timestamp, relativeTo: Date())
+    }
 }
 
 enum SocialPostType: CaseIterable {
@@ -480,7 +498,7 @@ struct SocialPerformanceInfo {
 
 // MARK: - Trader Filter
 
-enum TraderFilter: String, CaseIterable {
+enum TraderFilter: String, CaseIterable, Equatable {
     case all = "All"
     case topPerformers = "Top Performers"
     case mostFollowed = "Most Followed"

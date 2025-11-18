@@ -10,7 +10,7 @@ import SwiftUI
 
 // MARK: - Trader Model
 
-struct Trader: Identifiable, Codable {
+struct Trader: Identifiable, Codable, Equatable {
     let id: String
     let username: String
     let displayName: String
@@ -58,7 +58,7 @@ struct Trader: Identifiable, Codable {
 
 // MARK: - Trading Style
 
-enum TraderStyle: String, Codable, CaseIterable {
+enum TraderStyle: String, Codable, CaseIterable, Equatable {
     case scalping = "Scalping"
     case dayTrading = "Day Trading"
     case swingTrading = "Swing Trading"
@@ -91,7 +91,7 @@ enum TraderStyle: String, Codable, CaseIterable {
 
 // MARK: - Risk Level
 
-enum TraderRiskLevel: String, CaseIterable {
+enum TraderRiskLevel: String, CaseIterable, Equatable {
     case low = "Low"
     case medium = "Medium"
     case high = "High"
@@ -115,7 +115,7 @@ enum TraderRiskLevel: String, CaseIterable {
 
 // MARK: - Performance Data
 
-struct PerformanceData: Codable {
+struct PerformanceData: Codable, Equatable {
     let dailyReturns: [DailyReturn]
     let monthlyReturns: [MonthlyReturn]
     let drawdownHistory: [DrawdownEvent]
@@ -138,14 +138,14 @@ struct PerformanceData: Codable {
     }
 }
 
-struct DailyReturn: Codable {
+struct DailyReturn: Codable, Equatable {
     let date: Date
     let returnPercentage: Double
     let profit: Double
     let trades: Int
 }
 
-struct MonthlyReturn: Codable {
+struct MonthlyReturn: Codable, Equatable {
     let month: Date
     let returnPercentage: Double
     let profit: Double
@@ -153,14 +153,14 @@ struct MonthlyReturn: Codable {
     let winRate: Double
 }
 
-struct DrawdownEvent: Codable {
+struct DrawdownEvent: Codable, Equatable {
     let startDate: Date
     let endDate: Date?
     let percentage: Double
     let recovered: Bool
 }
 
-struct EquityPoint: Codable, Identifiable {
+struct EquityPoint: Codable, Identifiable, Equatable {
     let id = UUID()
     let date: Date
     let balance: Double
@@ -173,7 +173,7 @@ struct EquityPoint: Codable, Identifiable {
 
 // MARK: - Trader Statistics
 
-struct TraderStats: Codable {
+struct TraderStats: Codable, Equatable {
     let totalProfit: Double
     let totalLoss: Double
     let largestWin: Double

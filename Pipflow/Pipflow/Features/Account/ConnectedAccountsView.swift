@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ConnectedAccountsView: View {
     @StateObject private var tradingService = TradingService.shared
+    @StateObject private var syncService = AccountSyncService.shared
     @EnvironmentObject var themeManager: ThemeManager
     @State private var showingAddAccount = false
     @State private var showingDeleteAlert = false
@@ -39,6 +40,11 @@ struct ConnectedAccountsView: View {
                                         showingDeleteAlert = true
                                     }
                                 )
+                            }
+                            
+                            // Sync Status Card
+                            if !tradingService.connectedAccounts.isEmpty {
+                                AccountSyncView()
                             }
                             
                             // Add Account Button
@@ -241,6 +247,11 @@ struct ConnectedAccountCard: View {
                         }
                         
                         Spacer()
+                        
+                        // Sync Status Badge
+                        if tradingService.connectionStatus.isConnected {
+                            SyncStatusBadge()
+                        }
                         
                         // Delete Button
                         Button(action: onDelete) {

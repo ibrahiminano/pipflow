@@ -77,8 +77,16 @@ extension Color {
             ThemeManager.shared.currentTheme.secondaryBackgroundColor
         }
         
+        static var secondaryBackground: Color {
+            ThemeManager.shared.currentTheme.secondaryBackgroundColor
+        }
+        
         static var text: Color {
             ThemeManager.shared.currentTheme.textColor
+        }
+        
+        static var secondaryText: Color {
+            ThemeManager.shared.currentTheme.secondaryTextColor
         }
         
         // Dynamic accent color based on selected theme
@@ -110,12 +118,20 @@ extension Color {
             ThemeManager.shared.currentTheme.secondaryBackgroundColor
         }
         
+        static var surface: Color {
+            ThemeManager.shared.currentTheme.secondaryBackgroundColor
+        }
+        
         static var divider: Color {
             ThemeManager.shared.currentTheme.separatorColor
         }
         
         static var shadow: Color {
             ThemeManager.shared.currentTheme.shadowColor
+        }
+        
+        static var inputBackground: Color {
+            ThemeManager.shared.currentTheme.secondaryBackgroundColor.opacity(0.5)
         }
     }
 }

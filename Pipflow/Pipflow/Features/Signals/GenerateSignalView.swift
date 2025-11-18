@@ -208,12 +208,14 @@ struct GenerateSignalView: View {
 
 // MARK: - Generate Signal View Model
 
+@MainActor
 class GenerateSignalViewModel: ObservableObject {
     @Published var isGenerating = false
     @Published var errorMessage: String?
     
     private var cancellables = Set<AnyCancellable>()
     private let aiSignalService = AISignalService.shared
+    private let marketDataService = MarketDataService.shared
     
     func generateSignal(
         symbol: String,
@@ -224,82 +226,47 @@ class GenerateSignalViewModel: ObservableObject {
     ) {
         isGenerating = true
         
-        // In production, fetch real market data
-        let marketData = MarketData(
-            currentPrice: getLatestPrice(for: symbol),
-            high24h: getLatestPrice(for: symbol) * 1.005,
-            low24h: getLatestPrice(for: symbol) * 0.995,
-            volume24h: 1000000,
-            priceChange24h: 0.25,
-            bid: getLatestPrice(for: symbol) * 0.9999,
-            ask: getLatestPrice(for: symbol) * 1.0001,
-            spread: 0.0002
-        )
-        
-        let technicalIndicators = TechnicalIndicators(
-            rsi: Double.random(in: 30...70),
-            macd: MACDIndicator(
-                macd: Double.random(in: -0.002...0.002),
-                signal: Double.random(in: -0.001...0.001),
-                histogram: Double.random(in: -0.0005...0.0005)
-            ),
-            movingAverages: MovingAverages(
-                ma20: getLatestPrice(for: symbol) * Double.random(in: 0.998...1.002),
-                ma50: getLatestPrice(for: symbol) * Double.random(in: 0.995...1.005),
-                ma200: getLatestPrice(for: symbol) * Double.random(in: 0.99...1.01)
-            ),
-            support: getLatestPrice(for: symbol) * 0.99,
-            resistance: getLatestPrice(for: symbol) * 1.01,
-            trend: [TrendDirection.bullish, .bearish, .neutral].randomElement()!
-        )
-        
-        var news: [NewsItem]? = nil
-        if includeNews {
-            news = [
-                NewsItem(
-                    title: "Market shows signs of recovery",
-                    summary: "Technical indicators suggest potential reversal",
-                    sentiment: 0.6,
-                    timestamp: Date()
-                )
-            ]
-        }
-        
-        aiSignalService.generateSignal(
-            for: symbol,
-            timeframe: timeframe,
-            marketData: marketData,
-            technicalIndicators: technicalIndicators,
-            recentNews: news,
-            provider: provider
-        )
-        .sink(
-            receiveCompletion: { [weak self] completion in
-                self?.isGenerating = false
-                if case .failure(let error) = completion {
-                    self?.errorMessage = error.localizedDescription
-                } else {
-                    DispatchQueue.main.async {
-                        onComplete()
-                    }
+        Task {
+            do {
+                // Fetch real market data
+                let marketData = try await marketDataService.fetchMarketData(for: symbol)
+                let technicalIndicators = try await marketDataService.fetchTechnicalIndicators(for: symbol)
+                
+                var news: [NewsItem]? = nil
+                if includeNews {
+                    news = await marketDataService.fetchRecentNews(for: symbol)
                 }
-            },
-            receiveValue: { _ in }
-        )
-        .store(in: &cancellables)
-    }
-    
-    private func getLatestPrice(for symbol: String) -> Double {
-        // Mock prices for demo
-        switch symbol {
-        case "EURUSD": return 1.0850
-        case "GBPUSD": return 1.2750
-        case "USDJPY": return 155.50
-        case "AUDUSD": return 0.6550
-        case "BTCUSD": return 98500
-        case "ETHUSD": return 3850
-        case "XAUUSD": return 2650
-        default: return 1.0
+                
+                // Generate signal using real data
+                aiSignalService.generateSignal(
+                    for: symbol,
+                    timeframe: timeframe,
+                    marketData: marketData,
+                    technicalIndicators: technicalIndicators,
+                    recentNews: news,
+                    provider: provider
+                )
+                .sink(
+                    receiveCompletion: { [weak self] completion in
+                        self?.isGenerating = false
+                        if case .failure(let error) = completion {
+                            self?.errorMessage = "Failed to generate signal: \(error.localizedDescription)"
+                        } else {
+                            DispatchQueue.main.async {
+                                onComplete()
+                            }
+                        }
+                    },
+                    receiveValue: { _ in }
+                )
+                .store(in: &cancellables)
+                
+            } catch {
+                await MainActor.run {
+                    self.isGenerating = false
+                    self.errorMessage = "Failed to fetch market data: \(error.localizedDescription)"
+                }
+            }
         }
     }
 }

@@ -8,35 +8,9 @@
 import Foundation
 import Combine
 
-enum AuthError: LocalizedError {
-    case invalidCredentials
-    case userNotFound
-    case emailAlreadyExists
-    case weakPassword
-    case networkError
-    case unknown(String)
-    
-    var errorDescription: String? {
-        switch self {
-        case .invalidCredentials:
-            return "Invalid email or password"
-        case .userNotFound:
-            return "User not found"
-        case .emailAlreadyExists:
-            return "Email already exists"
-        case .weakPassword:
-            return "Password is too weak"
-        case .networkError:
-            return "Network connection error"
-        case .unknown(let message):
-            return message
-        }
-    }
-}
-
 protocol AuthServiceProtocol {
-    var currentUser: AnyPublisher<User?, Never> { get }
-    var isAuthenticated: AnyPublisher<Bool, Never> { get }
+    var currentUserPublisher: AnyPublisher<User?, Never> { get }
+    var isAuthenticatedPublisher: AnyPublisher<Bool, Never> { get }
     
     func signIn(email: String, password: String) -> AnyPublisher<User, AuthError>
     func signUp(email: String, password: String) -> AnyPublisher<User, AuthError>
@@ -48,247 +22,269 @@ protocol AuthServiceProtocol {
 class AuthService: ObservableObject, AuthServiceProtocol {
     static let shared = AuthService()
     
-    @Published var currentUserSubject = CurrentValueSubject<User?, Never>(nil)
-    private let apiClient: APIClientProtocol
+    @Published var isAuthenticated = false
+    @Published var currentUser: User? = nil
+    
+    private let currentUserSubject = CurrentValueSubject<User?, Never>(nil)
+    private let supabaseService = SupabaseService.shared
     private var cancellables = Set<AnyCancellable>()
     
-    var currentUser: AnyPublisher<User?, Never> {
+    var currentUserPublisher: AnyPublisher<User?, Never> {
         currentUserSubject.eraseToAnyPublisher()
     }
     
-    var isAuthenticated: AnyPublisher<Bool, Never> {
-        currentUser
+    var isAuthenticatedPublisher: AnyPublisher<Bool, Never> {
+        currentUserPublisher
             .map { $0 != nil }
             .eraseToAnyPublisher()
     }
     
-    init(apiClient: APIClientProtocol = APIClient.shared) {
-        self.apiClient = apiClient
-        loadStoredUser()
+    init() {
+        // Subscribe to Supabase auth state changes
+        supabaseService.$currentUser
+            .sink { [weak self] user in
+                self?.currentUser = user
+                self?.currentUserSubject.send(user)
+                self?.isAuthenticated = user != nil
+            }
+            .store(in: &cancellables)
+        
+        // Check if we're in development mode without Supabase
+        if ProcessInfo.processInfo.environment["SUPABASE_URL"]?.isEmpty ?? true {
+            // Auto-login for development/demo
+            autoLoginForDemo()
+        }
     }
     
-    func signIn(email: String, password: String) -> AnyPublisher<User, AuthError> {
-        let endpoint = AuthEndpoint.signIn(email: email, password: password)
+    // MARK: - Async Methods for AuthViewModel
+    
+    func signIn(email: String, password: String) async throws {
+        // If no Supabase configured, use demo login
+        if ProcessInfo.processInfo.environment["SUPABASE_URL"]?.isEmpty ?? true {
+            if email == "demo@pipflow.ai" && password == "demo123" {
+                autoLoginForDemo()
+                return
+            } else {
+                throw AuthError.invalidCredentials
+            }
+        }
         
-        return apiClient.request(endpoint)
-            .map { (response: AuthResponse) in
-                // Store tokens securely
-                self.storeTokens(response.tokens)
-                
-                // Update current user
-                let user = response.user
-                self.currentUserSubject.send(user)
-                self.storeUser(user)
-                
-                return user
+        do {
+            _ = try await supabaseService.signIn(email: email, password: password)
+        } catch {
+            throw mapSupabaseError(error)
+        }
+    }
+    
+    func signUp(email: String, password: String, fullName: String) async throws {
+        // If no Supabase configured, simulate signup
+        if ProcessInfo.processInfo.environment["SUPABASE_URL"]?.isEmpty ?? true {
+            throw AuthError.unknown("Sign up not available in demo mode")
+        }
+        
+        do {
+            _ = try await supabaseService.signUp(email: email, password: password, fullName: fullName)
+        } catch {
+            throw mapSupabaseError(error)
+        }
+    }
+    
+    func signInWithApple() async throws {
+        // TODO: Implement Apple Sign In
+        throw AuthError.unknown("Apple Sign In not yet implemented")
+    }
+    
+    func signInWithGoogle() async throws {
+        // TODO: Implement Google Sign In
+        throw AuthError.unknown("Google Sign In not yet implemented")
+    }
+    
+    func resetPassword(email: String) async throws {
+        // If no Supabase configured, simulate reset
+        if ProcessInfo.processInfo.environment["SUPABASE_URL"]?.isEmpty ?? true {
+            throw AuthError.unknown("Password reset not available in demo mode")
+        }
+        
+        do {
+            try await supabaseService.resetPassword(email: email)
+        } catch {
+            throw mapSupabaseError(error)
+        }
+    }
+    
+    func signOut() async throws {
+        // If in demo mode, just clear the user
+        if ProcessInfo.processInfo.environment["SUPABASE_URL"]?.isEmpty ?? true {
+            currentUser = nil
+            currentUserSubject.send(nil)
+            isAuthenticated = false
+            return
+        }
+        
+        do {
+            try await supabaseService.signOut()
+        } catch {
+            throw mapSupabaseError(error)
+        }
+    }
+    
+    private func mapSupabaseError(_ error: Error) -> AuthError {
+        // Check if it's already an AuthError
+        if let authError = error as? AuthError {
+            return authError
+        }
+        
+        // Map Supabase errors to AuthError
+        if let nsError = error as NSError? {
+            switch nsError.code {
+            case 400:
+                return .invalidCredentials
+            case 404:
+                return .userNotFound
+            case 409:
+                return .emailAlreadyInUse
+            case 422:
+                return .weakPassword
+            default:
+                return .unknown(error.localizedDescription)
             }
-            .mapError { apiError in
-                self.mapAPIError(apiError)
+        }
+        return .unknown(error.localizedDescription)
+    }
+    
+    // MARK: - Combine Methods (for backward compatibility)
+    
+    func signIn(email: String, password: String) -> AnyPublisher<User, AuthError> {
+        Future { promise in
+            Task {
+                do {
+                    try await self.signIn(email: email, password: password)
+                    if let user = self.currentUser {
+                        promise(.success(user))
+                    } else {
+                        promise(.failure(.unknown("Failed to get user after sign in")))
+                    }
+                } catch let error as AuthError {
+                    promise(.failure(error))
+                } catch {
+                    promise(.failure(.unknown(error.localizedDescription)))
+                }
             }
-            .eraseToAnyPublisher()
+        }
+        .eraseToAnyPublisher()
     }
     
     func signUp(email: String, password: String) -> AnyPublisher<User, AuthError> {
-        let endpoint = AuthEndpoint.signUp(email: email, password: password)
-        
-        return apiClient.request(endpoint)
-            .map { (response: AuthResponse) in
-                // Store tokens securely
-                self.storeTokens(response.tokens)
-                
-                // Update current user
-                let user = response.user
-                self.currentUserSubject.send(user)
-                self.storeUser(user)
-                
-                return user
+        Future { promise in
+            Task {
+                do {
+                    // Extract name from email for demo
+                    let fullName = email.components(separatedBy: "@").first ?? "User"
+                    try await self.signUp(email: email, password: password, fullName: fullName)
+                    if let user = self.currentUser {
+                        promise(.success(user))
+                    } else {
+                        promise(.failure(.unknown("Failed to get user after sign up")))
+                    }
+                } catch let error as AuthError {
+                    promise(.failure(error))
+                } catch {
+                    promise(.failure(.unknown(error.localizedDescription)))
+                }
             }
-            .mapError { apiError in
-                self.mapAPIError(apiError)
-            }
-            .eraseToAnyPublisher()
+        }
+        .eraseToAnyPublisher()
     }
     
     func signOut() -> AnyPublisher<Void, Never> {
-        return Future { promise in
-            // Clear stored tokens and user data
-            self.clearStoredTokens()
-            self.clearStoredUser()
-            
-            // Update current user
-            self.currentUserSubject.send(nil)
-            
-            promise(.success(()))
+        Future { promise in
+            Task {
+                do {
+                    try await self.signOut()
+                    promise(.success(()))
+                } catch {
+                    // Sign out should always succeed from UI perspective
+                    promise(.success(()))
+                }
+            }
         }
         .eraseToAnyPublisher()
     }
     
     func resetPassword(email: String) -> AnyPublisher<Void, AuthError> {
-        let endpoint = AuthEndpoint.resetPassword(email: email)
-        
-        return apiClient.requestWithoutResponse(endpoint)
-            .mapError { apiError in
-                self.mapAPIError(apiError)
+        Future { promise in
+            Task {
+                do {
+                    try await self.resetPassword(email: email)
+                    promise(.success(()))
+                } catch let error as AuthError {
+                    promise(.failure(error))
+                } catch {
+                    promise(.failure(.unknown(error.localizedDescription)))
+                }
             }
-            .eraseToAnyPublisher()
+        }
+        .eraseToAnyPublisher()
     }
     
     func getCurrentUser() -> AnyPublisher<User?, AuthError> {
-        guard let storedTokens = getStoredTokens() else {
-            return Just(nil)
-                .setFailureType(to: AuthError.self)
-                .eraseToAnyPublisher()
-        }
-        
-        let endpoint = AuthEndpoint.getCurrentUser(token: storedTokens.accessToken)
-        
-        return apiClient.request(endpoint)
-            .map { (user: User) in
-                self.currentUserSubject.send(user)
-                self.storeUser(user)
-                return user
-            }
-            .mapError { apiError in
-                // If token is invalid, clear stored data
-                if case .unauthorized = apiError {
-                    self.clearStoredTokens()
-                    self.clearStoredUser()
-                    self.currentUserSubject.send(nil)
-                }
-                return self.mapAPIError(apiError)
-            }
+        Just(currentUser)
+            .setFailureType(to: AuthError.self)
             .eraseToAnyPublisher()
     }
     
-    // MARK: - Private Methods
+    // MARK: - Account Management
     
-    private func loadStoredUser() {
-        // Check if user is stored locally and load
-        if let userData = UserDefaults.standard.data(forKey: "stored_user"),
-           let user = try? JSONDecoder().decode(User.self, from: userData) {
-            currentUserSubject.send(user)
-            
-            // Validate session in background
-            getCurrentUser()
-                .sink(
-                    receiveCompletion: { _ in },
-                    receiveValue: { _ in }
-                )
-                .store(in: &cancellables)
-        }
-    }
-    
-    private func storeUser(_ user: User) {
-        if let userData = try? JSONEncoder().encode(user) {
-            UserDefaults.standard.set(userData, forKey: "stored_user")
-        }
-    }
-    
-    private func clearStoredUser() {
-        UserDefaults.standard.removeObject(forKey: "stored_user")
-    }
-    
-    private func storeTokens(_ tokens: AuthTokens) {
-        // Store in Keychain for security
-        let keychain = KeychainWrapper()
-        keychain.set(tokens.accessToken, forKey: "access_token")
-        keychain.set(tokens.refreshToken, forKey: "refresh_token")
-    }
-    
-    private func getStoredTokens() -> AuthTokens? {
-        let keychain = KeychainWrapper()
-        
-        guard let accessToken = keychain.string(forKey: "access_token"),
-              let refreshToken = keychain.string(forKey: "refresh_token") else {
-            return nil
+    func deleteAccount() async throws {
+        // In a real app, this would call Supabase to delete the account
+        if ProcessInfo.processInfo.environment["SUPABASE_URL"]?.isEmpty ?? true {
+            // Demo mode - just sign out
+            try await signOut()
+            return
         }
         
-        return AuthTokens(accessToken: accessToken, refreshToken: refreshToken)
+        // Delete account from Supabase
+        // await supabaseService.deleteAccount()
+        
+        // Sign out after deletion
+        try await signOut()
     }
     
-    private func clearStoredTokens() {
-        let keychain = KeychainWrapper()
-        keychain.removeObject(forKey: "access_token")
-        keychain.removeObject(forKey: "refresh_token")
-    }
-    
-    private func mapAPIError(_ apiError: APIError) -> AuthError {
-        switch apiError {
-        case .unauthorized:
-            return .invalidCredentials
-        case .serverError(let code, _):
-            switch code {
-            case 404:
-                return .userNotFound
-            case 409:
-                return .emailAlreadyExists
-            case 422:
-                return .weakPassword
-            default:
-                return .networkError
-            }
-        case .networkError:
-            return .networkError
-        default:
-            return .unknown(apiError.localizedDescription)
-        }
-    }
-}
-
-// MARK: - Response Models
-
-private struct AuthResponse: Decodable {
-    let user: User
-    let tokens: AuthTokens
-}
-
-private struct AuthTokens: Codable {
-    let accessToken: String
-    let refreshToken: String
-}
-
-// MARK: - Keychain Wrapper
-
-private class KeychainWrapper {
-    func set(_ value: String, forKey key: String) {
-        let data = value.data(using: .utf8)!
-        
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
-            kSecValueData as String: data
-        ]
-        
-        SecItemDelete(query as CFDictionary)
-        SecItemAdd(query as CFDictionary, nil)
-    }
-    
-    func string(forKey key: String) -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne
-        ]
-        
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        
-        guard status == errSecSuccess,
-              let data = result as? Data,
-              let string = String(data: data, encoding: .utf8) else {
-            return nil
+    func resendVerificationEmail() async throws {
+        // In a real app, this would call Supabase to resend verification
+        if ProcessInfo.processInfo.environment["SUPABASE_URL"]?.isEmpty ?? true {
+            // Demo mode - do nothing
+            return
         }
         
-        return string
+        // Resend verification email
+        // try await supabaseService.resendVerificationEmail()
     }
     
-    func removeObject(forKey key: String) {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrAccount as String: key
-        ]
+    // MARK: - Demo Mode
+    
+    private func autoLoginForDemo() {
+        // Create a demo user for testing
+        let demoUser = User(
+            id: UUID(),
+            name: "Demo User",
+            email: "demo@pipflow.ai",
+            bio: "Trading enthusiast | AI-powered trader",
+            totalProfit: 15420.50,
+            winRate: 72.5,
+            totalTrades: 342,
+            followers: 1250,
+            following: 89,
+            avatarURL: nil,
+            riskScore: 65,
+            isVerified: true,
+            isPro: true
+        )
         
-        SecItemDelete(query as CFDictionary)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            self?.currentUser = demoUser
+            self?.currentUserSubject.send(demoUser)
+            self?.isAuthenticated = true
+        }
     }
 }

@@ -15,7 +15,7 @@ struct Strategy: Codable, Identifiable {
     let authorName: String
     let authorAvatarURL: String?
     let category: StrategyCategory
-    let tradingStyle: TradingStyle
+    let tradingStyle: StrategyTradingStyle
     let instruments: [String]
     let timeframes: [Timeframe]
     let performance: StrategyPerformance
@@ -30,7 +30,7 @@ struct Strategy: Codable, Identifiable {
     let createdAt: Date
     let updatedAt: Date
     
-    var riskLevel: RiskLevel {
+    var riskLevel: StrategyRiskLevel {
         switch riskScore {
         case 1...3: return .low
         case 4...6: return .medium
@@ -81,13 +81,13 @@ enum StrategyCategory: String, Codable, CaseIterable {
     }
 }
 
-enum TradingStyle: String, Codable, CaseIterable {
+enum StrategyTradingStyle: String, Codable, CaseIterable {
     case conservative = "CONSERVATIVE"
     case moderate = "MODERATE"
     case aggressive = "AGGRESSIVE"
 }
 
-enum RiskLevel: String, CaseIterable {
+enum StrategyRiskLevel: String, CaseIterable {
     case low = "LOW"
     case medium = "MEDIUM"
     case high = "HIGH"

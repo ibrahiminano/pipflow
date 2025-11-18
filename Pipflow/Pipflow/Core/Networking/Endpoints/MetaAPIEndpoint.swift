@@ -18,6 +18,7 @@ enum MetaAPIEndpoint: APIEndpoint {
     case deployAccount(accountId: String, token: String?)
     case undeployAccount(accountId: String, token: String?)
     case getCurrentUser(token: String?)
+    case getCandles(accountId: String, symbol: String, timeframe: String, startTime: Date, limit: Int, token: String?)
     
     var baseURL: String {
         "https://mt-client-api-v1.london.agiliumtrade.ai"
@@ -45,6 +46,8 @@ enum MetaAPIEndpoint: APIEndpoint {
             return "/users/current/accounts/\(accountId)/undeploy"
         case .getCurrentUser:
             return "/users/current"
+        case .getCandles(let accountId, _, _, _, _, _):
+            return "/users/current/accounts/\(accountId)/historical-candles"
         }
     }
     
@@ -52,7 +55,7 @@ enum MetaAPIEndpoint: APIEndpoint {
         switch self {
         case .linkAccount, .placeOrder, .deployAccount, .undeployAccount:
             return .post
-        case .getAccount, .getPositions, .getHistory, .getCurrentUser:
+        case .getAccount, .getPositions, .getHistory, .getCurrentUser, .getCandles:
             return .get
         case .closePosition:
             return .delete
@@ -74,7 +77,8 @@ enum MetaAPIEndpoint: APIEndpoint {
              .modifyPosition(_, _, _, _, let token),
              .deployAccount(_, let token),
              .undeployAccount(_, let token),
-             .getCurrentUser(let token):
+             .getCurrentUser(let token),
+             .getCandles(_, _, _, _, _, let token):
             if let token = token {
                 headers["auth-token"] = token
             }
@@ -90,6 +94,14 @@ enum MetaAPIEndpoint: APIEndpoint {
             return [
                 "startTime": formatter.string(from: from),
                 "endTime": formatter.string(from: to)
+            ]
+        case .getCandles(_, let symbol, let timeframe, let startTime, let limit, _):
+            let formatter = ISO8601DateFormatter()
+            return [
+                "symbol": symbol,
+                "timeframe": timeframe,
+                "startTime": formatter.string(from: startTime),
+                "limit": limit
             ]
         default:
             return nil

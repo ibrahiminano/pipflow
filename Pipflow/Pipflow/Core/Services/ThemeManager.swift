@@ -8,7 +8,7 @@
 import SwiftUI
 import Combine
 
-enum AppTheme: String, CaseIterable {
+enum AppTheme: String, CaseIterable, Codable {
     case black = "Black"
     case orange = "Orange"
     case blue = "Blue"

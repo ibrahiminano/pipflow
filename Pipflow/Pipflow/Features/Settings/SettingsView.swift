@@ -11,137 +11,193 @@ import Combine
 struct SettingsView: View {
     @StateObject private var themeManager = ThemeManager.shared
     @StateObject private var tradingService = TradingService.shared
+    @StateObject private var uiStyleManager = UIStyleManager.shared
+    @StateObject private var authService = AuthService.shared
+    @StateObject private var settingsService = SettingsService.shared
+    @StateObject private var tokenService = PIPSTokenService.shared
+    
     @State private var showSignOutAlert = false
     @State private var showAccountLinking = false
     @State private var showConnectedAccounts = false
-    @EnvironmentObject var authService: AuthService
+    
+    // New Sheet States
+    @State private var showingAccountManagement = false
+    @State private var showingGeneralPreferences = false
+    @State private var showingThemeCustomization = false
+    @State private var showingTradingPreferences = false
+    @State private var showingNotificationPreferences = false
+    @State private var showingPrivacySettings = false
+    @State private var showingAbout = false
+    @State private var showingARTrading = false
+    @State private var showingStrategyBuilder = false
+    @State private var showingPIPSWallet = false
+    @State private var showingChallenges = false
     
     var body: some View {
         NavigationView {
             List {
                 // Profile Section
                 Section {
-                    HStack {
-                        ZStack {
-                            Circle()
-                                .fill(
-                                    LinearGradient(
-                                        colors: [Color.Theme.gradientStart, Color.Theme.gradientEnd],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
+                    Button(action: { showingAccountManagement = true }) {
+                        HStack {
+                            ZStack {
+                                Circle()
+                                    .fill(
+                                        LinearGradient(
+                                            colors: [Color.Theme.gradientStart, Color.Theme.gradientEnd],
+                                            startPoint: .topLeading,
+                                            endPoint: .bottomTrailing
+                                        )
                                     )
-                                )
-                                .frame(width: 60, height: 60)
+                                    .frame(width: 60, height: 60)
+                                
+                                Text(initials)
+                                    .font(.title3)
+                                    .fontWeight(.bold)
+                                    .foregroundColor(.white)
+                            }
                             
-                            Text("JD")
-                                .font(.title3)
-                                .fontWeight(.bold)
-                                .foregroundColor(.white)
-                        }
-                        
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("John Doe")
-                                .font(.bodyLarge)
-                                .fontWeight(.semibold)
-                                .foregroundColor(Color.Theme.text)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(authService.currentUser?.name ?? "User")
+                                    .font(.bodyLarge)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(Color.Theme.text)
+                                
+                                Text(authService.currentUser?.email ?? "")
+                                    .font(.bodyMedium)
+                                    .foregroundColor(Color.Theme.text.opacity(0.7))
+                            }
                             
-                            Text("john.doe@example.com")
-                                .font(.bodyMedium)
-                                .foregroundColor(Color.Theme.text.opacity(0.7))
+                            Spacer()
+                            
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(Color.Theme.text.opacity(0.3))
                         }
-                        
-                        Spacer()
+                        .padding(.vertical, 8)
                     }
-                    .padding(.vertical, 8)
+                    .buttonStyle(PlainButtonStyle())
                 }
                 
-                // Appearance Section
-                Section("Appearance") {
-                    ForEach(AppTheme.allCases, id: \.self) { theme in
-                        ThemeRowView(
-                            theme: theme,
-                            isSelected: themeManager.appTheme == theme,
-                            action: {
-                                withAnimation(.easeInOut(duration: 0.3)) {
-                                    themeManager.appTheme = theme
-                                }
-                            }
+                // General Settings
+                Section("General") {
+                    Button(action: { showingGeneralPreferences = true }) {
+                        SettingsRow(
+                            icon: "globe",
+                            title: "Language & Region",
+                            value: settingsService.settings.general.language.displayName,
+                            showChevron: true
                         )
                     }
-                }
-                
-                // Trading Settings
-                Section("Trading") {
-                    SettingsRow(
-                        icon: "chart.line.uptrend.xyaxis",
-                        title: "Default Chart Type",
-                        value: "Candlestick"
-                    )
+                    .buttonStyle(PlainButtonStyle())
                     
-                    SettingsRow(
-                        icon: "clock",
-                        title: "Default Timeframe",
-                        value: "1H"
-                    )
-                    
-                    Toggle(isOn: .constant(true)) {
-                        HStack {
-                            Image(systemName: "bell.badge")
-                                .foregroundColor(Color.Theme.accent)
-                            Text("Push Notifications")
-                                .foregroundColor(Color.Theme.text)
-                        }
-                    }
-                    .tint(Color.Theme.accent)
-                }
-                
-                // Account Settings
-                Section("Account") {
-                    SettingsRow(
-                        icon: "person.crop.circle",
-                        title: "Profile",
-                        showChevron: true
-                    )
-                    
-                    SettingsRow(
-                        icon: "creditcard",
-                        title: "Subscription",
-                        value: "Pro",
-                        showChevron: true
-                    )
-                    
-                    Button(action: {
-                        showConnectedAccounts = true
-                    }) {
+                    Button(action: { showingThemeCustomization = true }) {
                         SettingsRow(
-                            icon: "link",
-                            title: "Trading Accounts",
-                            value: tradingService.connectedAccounts.isEmpty ? "None" : "\(tradingService.connectedAccounts.count)",
+                            icon: "paintbrush",
+                            title: "Appearance",
+                            value: themeManager.appTheme.displayName,
+                            showChevron: true
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Button(action: { showingNotificationPreferences = true }) {
+                        SettingsRow(
+                            icon: "bell.badge",
+                            title: "Notifications",
                             showChevron: true
                         )
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
                 
-                // Support
+                // Trading Settings
+                Section("Trading") {
+                    Button(action: { showingTradingPreferences = true }) {
+                        SettingsRow(
+                            icon: "chart.line.uptrend.xyaxis",
+                            title: "Trading Preferences",
+                            showChevron: true
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Button(action: { showConnectedAccounts = true }) {
+                        SettingsRow(
+                            icon: "link",
+                            title: "Connected Accounts",
+                            value: tradingService.connectedAccounts.isEmpty ? "None" : "\(tradingService.connectedAccounts.count)",
+                            showChevron: true
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // PIPS Wallet
+                    NavigationLink(destination: PIPSWalletView()) {
+                        SettingsRow(
+                            icon: "bitcoinsign.circle.fill",
+                            title: "PIPS Wallet",
+                            value: formatPIPSBalance(),
+                            showChevron: true
+                        )
+                    }
+                    
+                    // Trading Challenges
+                    NavigationLink(destination: ChallengeListView()) {
+                        SettingsRow(
+                            icon: "trophy.fill",
+                            title: "Trading Challenges",
+                            value: "Win PIPS",
+                            showChevron: true
+                        )
+                    }
+                }
+                
+                // Privacy & Security
+                Section("Privacy & Security") {
+                    // Temporarily removed BiometricSetupView to fix rendering issue
+                    
+                    Button(action: { showingPrivacySettings = true }) {
+                        SettingsRow(
+                            icon: "hand.raised",
+                            title: "Privacy & Data",
+                            showChevron: true
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    // Advanced Features moved here
+                    Button(action: { showingARTrading = true }) {
+                        SettingsRow(
+                            icon: "cube",
+                            title: "AR Trading",
+                            value: "Beta",
+                            showChevron: true
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Button(action: { showingStrategyBuilder = true }) {
+                        SettingsRow(
+                            icon: "cpu",
+                            title: "Strategy Builder",
+                            showChevron: true
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                }
+                
+                // Support & About
                 Section("Support") {
-                    SettingsRow(
-                        icon: "questionmark.circle",
-                        title: "Help Center",
-                        showChevron: true
-                    )
-                    
-                    SettingsRow(
-                        icon: "doc.text",
-                        title: "Terms of Service",
-                        showChevron: true
-                    )
-                    
-                    SettingsRow(
-                        icon: "hand.raised",
-                        title: "Privacy Policy",
-                        showChevron: true
-                    )
+                    Button(action: { showingAbout = true }) {
+                        SettingsRow(
+                            icon: "info.circle",
+                            title: "About",
+                            value: "v\(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")",
+                            showChevron: true
+                        )
+                    }
+                    .buttonStyle(PlainButtonStyle())
                 }
                 
                 // Sign Out
@@ -172,16 +228,69 @@ struct SettingsView: View {
             } message: {
                 Text("Are you sure you want to sign out?")
             }
+            // New Sheets
+            .sheet(isPresented: $showingAccountManagement) {
+                AccountManagementView()
+            }
+            .sheet(isPresented: $showingGeneralPreferences) {
+                GeneralPreferencesView()
+            }
+            .sheet(isPresented: $showingThemeCustomization) {
+                ThemeCustomizationView()
+            }
+            .sheet(isPresented: $showingTradingPreferences) {
+                TradingPreferencesView()
+            }
+            .sheet(isPresented: $showingNotificationPreferences) {
+                NotificationPreferencesView()
+            }
+            .sheet(isPresented: $showingPrivacySettings) {
+                PrivacySettingsView()
+            }
+            .sheet(isPresented: $showingAbout) {
+                AboutView()
+            }
+            .fullScreenCover(isPresented: $showingARTrading) {
+                ARTradingView()
+            }
+            .sheet(isPresented: $showingStrategyBuilder) {
+                StrategyBuilderView()
+            }
+            .sheet(isPresented: $showingPIPSWallet) {
+                PIPSWalletView()
+            }
+            .sheet(isPresented: $showingChallenges) {
+                ChallengeListView()
+            }
+            // Existing Sheets
             .sheet(isPresented: $showAccountLinking) {
                 AccountLinkingView()
             }
             .sheet(isPresented: $showConnectedAccounts) {
-                ConnectedAccountsView()
+                NavigationView {
+                    ConnectedAccountsView()
+                }
             }
         }
     }
     
     @State private var cancellables = Set<AnyCancellable>()
+    
+    private var initials: String {
+        let name = authService.currentUser?.name ?? authService.currentUser?.email ?? "U"
+        let components = name.components(separatedBy: " ")
+        
+        if components.count >= 2 {
+            return "\(components[0].prefix(1))\(components[1].prefix(1))".uppercased()
+        } else {
+            return String(name.prefix(2)).uppercased()
+        }
+    }
+    
+    private func formatPIPSBalance() -> String {
+        let balance = tokenService.wallet?.balance ?? 0
+        return "\(Int(balance)) PIPS"
+    }
 }
 
 struct ThemeRowView: View {
@@ -261,5 +370,4 @@ struct SettingsRow: View {
 
 #Preview {
     SettingsView()
-        .environmentObject(AuthService.shared)
 }

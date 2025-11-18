@@ -145,4 +145,8 @@ yarn-debug.log*
 yarn-error.log*
 
 # SwiftLint
-.swiftlint.yml.tmp 
+.swiftlint.yml.tmp
+
+# Flutter project (not part of this repo)
+pipflow_flutter/
+revolut_design/

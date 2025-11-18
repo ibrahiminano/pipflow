@@ -9,9 +9,22 @@ import SwiftUI
 import Combine
 
 struct TradingView: View {
+    var body: some View {
+        ProfessionalTradingView()
+    }
+}
+
+// Keep the original TradingView implementation as OldTradingView for reference
+struct OldTradingView: View {
     @StateObject private var viewModel = TradingViewModel()
+    @StateObject private var metaAPIService = MetaAPIService.shared
+    @StateObject private var webSocketService = MetaAPIWebSocketService.shared
+    @StateObject private var syncService = AccountSyncService.shared
+    @StateObject private var uiStyleManager = UIStyleManager.shared
     @State private var selectedSymbol = "EURUSD"
     @State private var showNewTradeSheet = false
+    @State private var showMetaTraderLink = false
+    @State private var showAutoTrading = false
     
     var body: some View {
         NavigationView {
@@ -23,10 +36,45 @@ struct TradingView: View {
                 
                 ScrollView {
                     VStack(spacing: 16) {
+                        // Account Connection Banner
+                        if !viewModel.hasConnectedAccount {
+                            Button(action: { showMetaTraderLink = true }) {
+                                HStack {
+                                    Image(systemName: "link.circle.fill")
+                                        .font(.title3)
+                                    
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Connect MetaTrader Account")
+                                            .font(.subheadline)
+                                            .fontWeight(.semibold)
+                                        Text("Link your MT4/MT5 to start trading")
+                                            .font(.caption)
+                                            .opacity(0.7)
+                                    }
+                                    
+                                    Spacer()
+                                    
+                                    Image(systemName: "chevron.right")
+                                        .font(.caption)
+                                        .opacity(0.5)
+                                }
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(
+                                    LinearGradient(
+                                        colors: [Color(hex: "00F5A0").opacity(0.8), Color(hex: "00D9FF").opacity(0.8)],
+                                        startPoint: .leading,
+                                        endPoint: .trailing
+                                    )
+                                )
+                                .cornerRadius(12)
+                            }
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                        }
+                        
                         // Chart Button - Made more prominent
-                        Button(action: {
-                            ChartPresentationManager.shared.presentChart(for: selectedSymbol)
-                        }) {
+                        NavigationLink(destination: ChartView(symbol: selectedSymbol)) {
                             HStack(spacing: 12) {
                                 Image(systemName: "chart.line.uptrend.xyaxis")
                                     .font(.title2)
@@ -40,7 +88,7 @@ struct TradingView: View {
                             .cornerRadius(12)
                         }
                         .padding(.horizontal)
-                        .padding(.top, 8)
+                        .padding(.top, viewModel.hasConnectedAccount ? 8 : 0)
                         
                         // Price Card
                         PriceCardView(symbol: selectedSymbol)
@@ -68,8 +116,13 @@ struct TradingView: View {
                         }
                         .padding(.horizontal)
                         
+                        // AI Auto-Trading Card
+                        AIAutoTradingCard(showAutoTrading: $showAutoTrading)
+                            .padding(.horizontal)
+                            .padding(.top, 8)
+                        
                         // Open Positions
-                        if !viewModel.positions.isEmpty {
+                        if !metaAPIService.positions.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Open Positions")
                                     .font(.title3)
@@ -77,7 +130,7 @@ struct TradingView: View {
                                     .foregroundColor(Color.Theme.text)
                                     .padding(.horizontal)
                                 
-                                ForEach(viewModel.positions) { position in
+                                ForEach(metaAPIService.positions) { position in
                                     PositionCardView(position: position)
                                         .padding(.horizontal)
                                 }
@@ -85,7 +138,7 @@ struct TradingView: View {
                         }
                         
                         // Pending Orders
-                        if !viewModel.orders.isEmpty {
+                        if !webSocketService.orders.isEmpty {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Pending Orders")
                                     .font(.title3)
@@ -93,8 +146,8 @@ struct TradingView: View {
                                     .foregroundColor(Color.Theme.text)
                                     .padding(.horizontal)
                                 
-                                ForEach(viewModel.orders) { order in
-                                    OrderCardView(order: order)
+                                ForEach(webSocketService.orders, id: \.id) { order in
+                                    OrderRowView(order: order)
                                         .padding(.horizontal)
                                 }
                             }
@@ -107,12 +160,32 @@ struct TradingView: View {
             .navigationTitle("Trading")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if webSocketService.connectionState == .connected {
+                        SyncStatusBadge()
+                    }
+                }
+                
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: {
-                        ChartPresentationManager.shared.presentChart(for: selectedSymbol)
-                    }) {
-                        Image(systemName: "chart.line.uptrend.xyaxis")
-                            .foregroundColor(Color.blue)
+                    HStack(spacing: 16) {
+                        // Refresh button
+                        Button(action: {
+                            Task {
+                                await syncService.syncAccount()
+                            }
+                        }) {
+                            Image(systemName: "arrow.clockwise")
+                                .foregroundColor(syncService.syncStatus.isActive ? .gray : Color.blue)
+                        }
+                        .disabled(syncService.syncStatus.isActive)
+                        
+                        // Chart button
+                        Button(action: {
+                            ChartPresentationManager.shared.presentChart(for: selectedSymbol)
+                        }) {
+                            Image(systemName: "chart.line.uptrend.xyaxis")
+                                .foregroundColor(Color.blue)
+                        }
                     }
                 }
             }
@@ -125,12 +198,154 @@ struct TradingView: View {
                         viewModel.refreshData()
                     }
                 )
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
+                .presentationCornerRadius(20)
+            }
+            .fullScreenCover(isPresented: $showMetaTraderLink) {
+                MetaTraderLinkView()
+            }
+            .sheet(isPresented: $showAutoTrading) {
+                NavigationView {
+                    AIAutoTradingView()
+                }
+                .presentationDetents([.large])
+                .presentationDragIndicator(.visible)
             }
         }
     }
 }
 
 // MARK: - Supporting Views
+
+struct AIAutoTradingCard: View {
+    @Binding var showAutoTrading: Bool
+    @StateObject private var engine = AIAutoTradingEngine.shared
+    
+    var body: some View {
+        Button(action: { 
+            print("DEBUG: AI Auto-Trading card tapped")
+            showAutoTrading = true 
+            print("DEBUG: showAutoTrading set to: \(showAutoTrading)")
+        }) {
+            VStack(spacing: 12) {
+                HStack {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack {
+                            Image(systemName: "brain")
+                                .font(.title3)
+                                .foregroundColor(Color.Theme.accent)
+                            
+                            Text("AI Auto-Trading")
+                                .font(.headline)
+                                .foregroundColor(Color.Theme.text)
+                        }
+                        
+                        Text(engine.isActive ? "Active • \(engine.config.mode.rawValue)" : "Inactive")
+                            .font(.caption)
+                            .foregroundColor(Color.Theme.text.opacity(0.7))
+                    }
+                    
+                    Spacer()
+                    
+                    if engine.isActive {
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(statusColor)
+                                .frame(width: 8, height: 8)
+                            
+                            Text(statusText)
+                                .font(.caption)
+                                .foregroundColor(statusColor)
+                        }
+                    } else {
+                        Image(systemName: "chevron.right")
+                            .font(.caption)
+                            .foregroundColor(Color.Theme.text.opacity(0.5))
+                    }
+                }
+                
+                if engine.isActive {
+                    HStack(spacing: 16) {
+                        MetricLabel(
+                            label: "Trades",
+                            value: "\(engine.metrics.totalTrades)"
+                        )
+                        
+                        MetricLabel(
+                            label: "Win Rate",
+                            value: String(format: "%.0f%%", engine.metrics.winRate * 100)
+                        )
+                        
+                        MetricLabel(
+                            label: "P&L",
+                            value: String(format: "$%.0f", engine.metrics.netProfit),
+                            color: engine.metrics.netProfit >= 0 ? .green : .red
+                        )
+                        
+                        Spacer()
+                    }
+                    .font(.caption)
+                }
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.Theme.surface)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(engine.isActive ? Color.Theme.accent.opacity(0.3) : Color.clear, lineWidth: 1)
+                    )
+            )
+        }
+    }
+    
+    private var statusColor: Color {
+        switch engine.state {
+        case .analyzing:
+            return .blue
+        case .executingTrade:
+            return .orange
+        case .monitoring:
+            return .green
+        case .paused:
+            return .yellow
+        default:
+            return .gray
+        }
+    }
+    
+    private var statusText: String {
+        switch engine.state {
+        case .analyzing:
+            return "Analyzing"
+        case .executingTrade:
+            return "Trading"
+        case .monitoring:
+            return "Monitoring"
+        case .paused:
+            return "Paused"
+        default:
+            return "Idle"
+        }
+    }
+}
+
+struct MetricLabel: View {
+    let label: String
+    let value: String
+    var color: Color = Color.Theme.text
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .foregroundColor(Color.Theme.text.opacity(0.6))
+            Text(value)
+                .fontWeight(.medium)
+                .foregroundColor(color)
+        }
+    }
+}
 
 struct SymbolSelectorView: View {
     @Binding var selectedSymbol: String
@@ -323,17 +538,17 @@ struct PositionCardView: View {
                             .font(.bodyLarge)
                             .fontWeight(.semibold)
                         
-                        Text(position.side.rawValue.uppercased())
+                        Text(position.type == .buy ? "BUY" : "SELL")
                             .font(.caption)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(position.side == .buy ? Color.Theme.buy : Color.Theme.sell)
+                            .background(position.type == .buy ? Color.Theme.buy : Color.Theme.sell)
                             .foregroundColor(.white)
                             .cornerRadius(4)
                     }
                     .foregroundColor(Color.Theme.text)
                     
-                    Text("\(position.volume, specifier: "%.2f") lots @ \(position.openPrice, specifier: "%.5f")")
+                    Text("\(String(format: "%.2f", position.volume)) lots @ \(String(format: "%.5f", position.openPrice))")
                         .font(.caption)
                         .foregroundColor(Color.Theme.text.opacity(0.6))
                 }
@@ -341,25 +556,31 @@ struct PositionCardView: View {
                 Spacer()
                 
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(position.profit >= 0 ? "+$\(position.profit, specifier: "%.2f")" : "-$\(abs(position.profit), specifier: "%.2f")")
+                    let profitDouble = position.unrealizedPL
+                    let profitPercent = position.unrealizedPLPercent
+                    
+                    Text(profitDouble >= 0 ? "+$\(String(format: "%.2f", profitDouble))" : "-$\(String(format: "%.2f", abs(profitDouble)))")
                         .font(.bodyLarge)
                         .fontWeight(.semibold)
-                        .foregroundColor(position.profit >= 0 ? Color.Theme.success : Color.Theme.error)
+                        .foregroundColor(profitDouble >= 0 ? Color.Theme.success : Color.Theme.error)
                     
-                    Text("\(position.profit >= 0 ? "+" : "")\(position.profitPercentage, specifier: "%.2f")%")
+                    Text("\(profitDouble >= 0 ? "+" : "")\(String(format: "%.2f", profitPercent))%")
                         .font(.caption)
-                        .foregroundColor(position.profit >= 0 ? Color.Theme.success : Color.Theme.error)
+                        .foregroundColor(profitDouble >= 0 ? Color.Theme.success : Color.Theme.error)
                 }
             }
             
             HStack {
-                Label("SL: \(position.stopLoss ?? 0, specifier: "%.5f")", systemImage: "shield")
+                let slDouble = position.stopLoss ?? 0
+                let tpDouble = position.takeProfit ?? 0
+                
+                Label("SL: \(String(format: "%.5f", slDouble))", systemImage: "shield")
                     .font(.caption)
                     .foregroundColor(Color.Theme.error)
                 
                 Spacer()
                 
-                Label("TP: \(position.takeProfit ?? 0, specifier: "%.5f")", systemImage: "target")
+                Label("TP: \(String(format: "%.5f", tpDouble))", systemImage: "target")
                     .font(.caption)
                     .foregroundColor(Color.Theme.success)
             }
@@ -412,18 +633,75 @@ struct OrderCardView: View {
     }
 }
 
+struct OrderRowView: View {
+    let order: OrderData
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(order.symbol)
+                        .font(.bodyLarge)
+                        .fontWeight(.semibold)
+                    
+                    Text(order.type.replacingOccurrences(of: "ORDER_TYPE_", with: ""))
+                        .font(.caption)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.Theme.warning)
+                        .foregroundColor(.white)
+                        .cornerRadius(4)
+                }
+                .foregroundColor(Color.Theme.text)
+                
+                Text("\(order.volume, specifier: "%.2f") lots @ \(order.openPrice, specifier: "%.5f")")
+                    .font(.caption)
+                    .foregroundColor(Color.Theme.text.opacity(0.6))
+            }
+            
+            Spacer()
+            
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(order.state)
+                    .font(.caption2)
+                    .foregroundColor(Color.Theme.warning)
+                if let currentPrice = order.currentPrice {
+                    Text("Current: \(currentPrice, specifier: "%.5f")")
+                        .font(.caption2)
+                        .foregroundColor(Color.Theme.text.opacity(0.6))
+                }
+            }
+        }
+        .padding()
+        .background(Color.Theme.cardBackground)
+        .cornerRadius(.cornerRadius)
+    }
+}
+
 // MARK: - View Model
 
 class TradingViewModel: ObservableObject {
     @Published var positions: [Position] = []
     @Published var orders: [PendingOrder] = []
     @Published var tradeSide: TradeSide = .buy
+    @Published var hasConnectedAccount = false
     
     private var cancellables = Set<AnyCancellable>()
     
     init() {
+        // Check for connected accounts
+        checkConnectedAccounts()
         // Load mock data for demonstration
         loadMockData()
+    }
+    
+    private func checkConnectedAccounts() {
+        // Check if user has any connected trading accounts
+        if let data = UserDefaults.standard.data(forKey: "connected_trading_accounts"),
+           let accounts = try? JSONDecoder().decode([TradingAccount].self, from: data),
+           !accounts.isEmpty {
+            hasConnectedAccount = true
+        }
     }
     
     func refreshData() {
@@ -432,21 +710,34 @@ class TradingViewModel: ObservableObject {
     }
     
     private func loadMockData() {
-        positions = [
-            Position(
-                id: "1",
-                symbol: "EURUSD",
-                side: .buy,
-                volume: 0.1,
-                openPrice: 1.0850,
-                currentPrice: 1.0854,
-                profit: 4.0,
-                profitPercentage: 0.04,
-                stopLoss: 1.0820,
-                takeProfit: 1.0880,
-                openTime: Date()
-            )
-        ]
+        // Create mock tracked position
+        let mockPosition = TrackedPosition(
+            id: "1",
+            symbol: "EURUSD",
+            type: .buy,
+            volume: 0.1,
+            openPrice: 1.0850,
+            openTime: Date(),
+            stopLoss: 1.0820,
+            takeProfit: 1.0880,
+            comment: nil,
+            magic: nil,
+            currentPrice: 1.0854,
+            bid: 1.0853,
+            ask: 1.0855,
+            unrealizedPL: 4.0,
+            unrealizedPLPercent: 0.37,
+            commission: 0,
+            swap: 0,
+            netPL: 4.0,
+            pipValue: 10,
+            pipsProfit: 4,
+            spread: 0.0002,
+            spreadCost: 2,
+            marginUsed: 108.50,
+            riskRewardRatio: 1.0
+        )
+        positions = [mockPosition]
         
         orders = [
             PendingOrder(
@@ -464,28 +755,6 @@ class TradingViewModel: ObservableObject {
 }
 
 // MARK: - Models
-
-struct Position: Identifiable {
-    let id: String
-    let symbol: String
-    let side: TradeSide
-    let volume: Double
-    let openPrice: Double
-    let currentPrice: Double
-    let profit: Double
-    let profitPercentage: Double
-    let stopLoss: Double?
-    let takeProfit: Double?
-    let openTime: Date
-    let swap: Double = 0
-    let commission: Double = 0
-    let magicNumber: Int? = nil
-    let comment: String? = nil
-    
-    var netProfit: Double {
-        profit - commission - swap
-    }
-}
 
 struct PendingOrder: Identifiable {
     let id: String

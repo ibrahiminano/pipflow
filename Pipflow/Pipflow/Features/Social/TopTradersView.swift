@@ -53,7 +53,7 @@ struct TopTradersView: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(TraderFilter.allCases, id: \.self) { filter in
-                            FilterPill(
+                            TopTradersFilterPill(
                                 title: filter.rawValue,
                                 isSelected: selectedFilter == filter,
                                 theme: themeManager.currentTheme
@@ -92,7 +92,7 @@ struct TopTradersView: View {
 
 // MARK: - Filter Pill
 
-struct FilterPill: View {
+struct TopTradersFilterPill: View {
     let title: String
     let isSelected: Bool
     let theme: Theme

@@ -65,7 +65,7 @@ enum AuthEndpoint: APIEndpoint {
     }
     
     var body: Data? {
-        let encoder = JSONEncoder()
+        let _ = JSONEncoder()
         
         switch self {
         case .signIn(let email, let password):

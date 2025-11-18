@@ -26,7 +26,7 @@ struct MarketWatchView: View {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 12) {
                             ForEach(categories, id: \.self) { category in
-                                CategoryChip(
+                                MarketWatchCategoryChip(
                                     title: category,
                                     isSelected: selectedCategory == category,
                                     theme: themeManager.currentTheme
@@ -92,7 +92,7 @@ struct MarketWatchView: View {
 struct MarketQuoteRow: View {
     let symbol: String
     let quote: MarketQuote
-    let priceChange: MarketDataService.PriceChange?
+    let priceChange: PriceChange?
     let theme: Theme
     
     var body: some View {
@@ -145,7 +145,7 @@ struct MarketQuoteRow: View {
                         Image(systemName: change.isPositive ? "arrow.up.right" : "arrow.down.right")
                             .font(.system(size: 10))
                         
-                        Text("\(change.changeAmount >= 0 ? "+" : "")\(formatPrice(change.changeAmount))")
+                        Text("\(change.changeValue >= 0 ? "+" : "")\(formatPrice(change.changeValue))")
                             .font(.system(size: 12, weight: .medium))
                         
                         Text("(\(String(format: "%.2f", change.changePercent))%)")
@@ -183,7 +183,7 @@ struct MarketQuoteRow: View {
 
 // MARK: - Category Chip
 
-struct CategoryChip: View {
+struct MarketWatchCategoryChip: View {
     let title: String
     let isSelected: Bool
     let theme: Theme
@@ -226,7 +226,7 @@ struct LivePriceHeader: View {
                     Image(systemName: change.isPositive ? "arrow.up.right" : "arrow.down.right")
                         .font(.system(size: 14))
                     
-                    Text("\(change.changeAmount >= 0 ? "+" : "")\(marketData.formatPrice(change.changeAmount, for: symbol))")
+                    Text("\(change.changeValue >= 0 ? "+" : "")\(marketData.formatPrice(change.changeValue, for: symbol))")
                         .font(.system(size: 16, weight: .semibold))
                     
                     Text("(\(String(format: "%.2f", change.changePercent))%)")

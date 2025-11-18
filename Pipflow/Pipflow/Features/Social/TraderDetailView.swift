@@ -30,7 +30,7 @@ struct TraderDetailView: View {
                 ScrollView {
                     VStack(spacing: 20) {
                         // Profile Header
-                        ProfileHeaderView(trader: trader)
+                        TraderProfileHeaderView(trader: trader)
                         
                         // Action Buttons
                         HStack(spacing: 12) {
@@ -134,7 +134,7 @@ struct TraderDetailView: View {
 
 // MARK: - Profile Header
 
-struct ProfileHeaderView: View {
+struct TraderProfileHeaderView: View {
     let trader: Trader
     @EnvironmentObject var themeManager: ThemeManager
     
@@ -346,25 +346,25 @@ struct PerformanceTabView: View {
             
             // Key Metrics
             VStack(spacing: 16) {
-                MetricRow(
+                TraderMetricRow(
                     title: "Sharpe Ratio",
                     value: String(format: "%.2f", trader.performance.sharpeRatio),
                     description: "Risk-adjusted returns"
                 )
                 
-                MetricRow(
+                TraderMetricRow(
                     title: "Max Drawdown",
                     value: String(format: "%.1f%%", trader.performance.maxDrawdown * 100),
                     description: "Largest peak-to-trough decline"
                 )
                 
-                MetricRow(
+                TraderMetricRow(
                     title: "Profit Factor",
                     value: String(format: "%.2f", trader.profitFactor),
                     description: "Gross profit / Gross loss"
                 )
                 
-                MetricRow(
+                TraderMetricRow(
                     title: "Average Trade",
                     value: String(format: "$%.2f", trader.averageReturn * 1000),
                     description: "Average profit per trade"
@@ -390,14 +390,14 @@ struct StatisticsTabView: View {
                     .font(.headline)
                     .foregroundColor(themeManager.currentTheme.textColor)
                 
-                StatRow(label: "Total Profit", value: String(format: "$%.2f", trader.stats.totalProfit))
-                StatRow(label: "Total Loss", value: String(format: "$%.2f", trader.stats.totalLoss))
-                StatRow(label: "Largest Win", value: String(format: "$%.2f", trader.stats.largestWin))
-                StatRow(label: "Largest Loss", value: String(format: "$%.2f", trader.stats.largestLoss))
-                StatRow(label: "Average Win", value: String(format: "$%.2f", trader.stats.averageWin))
-                StatRow(label: "Average Loss", value: String(format: "$%.2f", trader.stats.averageLoss))
-                StatRow(label: "Profit/Loss Ratio", value: String(format: "%.2f", trader.stats.profitLossRatio))
-                StatRow(label: "Expectancy", value: String(format: "$%.2f", trader.stats.expectancy))
+                TraderDetailStatRow(label: "Total Profit", value: String(format: "$%.2f", trader.stats.totalProfit))
+                TraderDetailStatRow(label: "Total Loss", value: String(format: "$%.2f", trader.stats.totalLoss))
+                TraderDetailStatRow(label: "Largest Win", value: String(format: "$%.2f", trader.stats.largestWin))
+                TraderDetailStatRow(label: "Largest Loss", value: String(format: "$%.2f", trader.stats.largestLoss))
+                TraderDetailStatRow(label: "Average Win", value: String(format: "$%.2f", trader.stats.averageWin))
+                TraderDetailStatRow(label: "Average Loss", value: String(format: "$%.2f", trader.stats.averageLoss))
+                TraderDetailStatRow(label: "Profit/Loss Ratio", value: String(format: "%.2f", trader.stats.profitLossRatio))
+                TraderDetailStatRow(label: "Expectancy", value: String(format: "$%.2f", trader.stats.expectancy))
             }
             .padding()
             .background(themeManager.currentTheme.secondaryBackgroundColor)
@@ -530,7 +530,7 @@ struct RecentTradeRow: View {
 
 // MARK: - Helper Views
 
-struct MetricRow: View {
+struct TraderMetricRow: View {
     let title: String
     let value: String
     let description: String
@@ -560,7 +560,7 @@ struct MetricRow: View {
     }
 }
 
-struct StatRow: View {
+struct TraderDetailStatRow: View {
     let label: String
     let value: String
     @EnvironmentObject var themeManager: ThemeManager

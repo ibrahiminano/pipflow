@@ -8,31 +8,10 @@
 import SwiftUI
 
 struct DashboardView: View {
-    @StateObject private var viewModel = DashboardViewModel()
-    
     var body: some View {
         NavigationView {
-            ScrollView {
-                VStack(spacing: 20) {
-                    // Account Summary Card
-                    AccountSummaryCard()
-                        .padding(.horizontal)
-                    
-                    // Quick Actions
-                    QuickActionsSection()
-                        .padding(.horizontal)
-                    
-                    // Active Positions
-                    ActivePositionsSection()
-                    
-                    // Recent Signals
-                    RecentSignalsSection()
-                }
-                .padding(.vertical)
-            }
-            .background(Color.Theme.background)
-            .navigationTitle("Dashboard")
-            .navigationBarTitleDisplayMode(.large)
+            FuturisticDashboard()
+                .navigationBarHidden(true)
         }
     }
 }
@@ -65,14 +44,14 @@ struct AccountSummaryCard: View {
             
             // Stats section
             HStack(spacing: .spacing) {
-                StatCard(
+                DashboardStatCard(
                     title: "Today's P&L",
                     value: "+$250.00",
                     valueColor: Color.Theme.success,
                     icon: "arrow.up.right"
                 )
                 
-                StatCard(
+                DashboardStatCard(
                     title: "Win Rate",
                     value: "68%",
                     valueColor: Color.Theme.accent,
@@ -83,7 +62,7 @@ struct AccountSummaryCard: View {
     }
 }
 
-struct StatCard: View {
+struct DashboardStatCard: View {
     let title: String
     let value: String
     let valueColor: Color
@@ -112,38 +91,77 @@ struct StatCard: View {
     }
 }
 
-struct QuickActionsSection: View {
+struct DashboardQuickActionsSection: View {
+    @State private var showStrategyBuilder = false
+    
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Quick Actions")
                 .font(.headline)
                 .foregroundColor(Color.Theme.text)
             
-            HStack(spacing: 12) {
-                QuickActionButton(
-                    icon: "chart.line.uptrend.xyaxis",
-                    title: "Trade",
-                    color: .green
-                )
-                
-                QuickActionButton(
-                    icon: "doc.text.magnifyingglass",
-                    title: "Signals",
-                    color: .blue
-                )
-                
-                QuickActionButton(
-                    icon: "person.2.fill",
-                    title: "Copy",
-                    color: .orange
-                )
-                
-                QuickActionButton(
-                    icon: "graduationcap.fill",
-                    title: "Learn",
-                    color: .purple
-                )
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    NavigationLink(destination: TradingView()) {
+                        QuickActionButton(
+                            icon: "chart.line.uptrend.xyaxis",
+                            title: "Trade",
+                            color: .green
+                        )
+                    }
+                    
+                    NavigationLink(destination: ChartView(symbol: "EURUSD")) {
+                        QuickActionButton(
+                            icon: "chart.xyaxis.line",
+                            title: "Chart",
+                            color: .purple
+                        )
+                    }
+                    
+                    NavigationLink(destination: TradingView()) {
+                        QuickActionButton(
+                            icon: "brain.head.profile",
+                            title: "AI Chart",
+                            color: .green
+                        )
+                    }
+                    
+                    NavigationLink(destination: SignalsView()) {
+                        QuickActionButton(
+                            icon: "doc.text.magnifyingglass",
+                            title: "Signals",
+                            color: .blue
+                        )
+                    }
+                    
+                    NavigationLink(destination: CopyTradingView()) {
+                        QuickActionButton(
+                            icon: "person.2.fill",
+                            title: "Copy",
+                            color: .orange
+                        )
+                    }
+                    
+                    Button(action: { showStrategyBuilder = true }) {
+                        QuickActionButton(
+                            icon: "cpu",
+                            title: "Builder",
+                            color: .pink
+                        )
+                    }
+                    
+                    NavigationLink(destination: AcademyView()) {
+                        QuickActionButton(
+                            icon: "graduationcap.fill",
+                            title: "Learn",
+                            color: .purple
+                        )
+                    }
+                }
             }
+        }
+        .sheet(isPresented: $showStrategyBuilder) {
+            StrategyBuilderView()
         }
     }
 }
@@ -232,17 +250,24 @@ struct PositionCard: View {
     
     var profit: Double {
         let price = currentPrice
-        if position.side == .buy {
-            return (price - position.openPrice) * position.volume * 100000
+        let openPriceDouble = position.openPrice
+        let volumeDouble = position.volume
+        
+        if position.type == .buy {
+            return (price - openPriceDouble) * volumeDouble * 100000
         } else {
-            return (position.openPrice - price) * position.volume * 100000
+            return (openPriceDouble - price) * volumeDouble * 100000
         }
     }
     
     var profitPercentage: Double {
-        guard position.openPrice > 0 else { return 0 }
-        let pips = position.side == .buy ? currentPrice - position.openPrice : position.openPrice - currentPrice
-        return (pips / position.openPrice) * 100
+        let openPriceDouble = position.openPrice
+        guard openPriceDouble > 0 else { return 0 }
+        
+        let pips = position.type == .buy ? 
+            currentPrice - openPriceDouble : 
+            openPriceDouble - currentPrice
+        return (pips / openPriceDouble) * 100
     }
     
     var body: some View {
@@ -261,13 +286,13 @@ struct PositionCard: View {
                 
                 Spacer()
                 
-                Text(position.side.rawValue.uppercased())
+                Text(position.type.rawValue.uppercased())
                     .font(.caption)
                     .fontWeight(.semibold)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 6)
-                    .background((position.side == .buy ? Color.Theme.buy : Color.Theme.sell).opacity(0.15))
-                    .foregroundColor(position.side == .buy ? Color.Theme.buy : Color.Theme.sell)
+                    .background((position.type == .buy ? Color.Theme.buy : Color.Theme.sell).opacity(0.15))
+                    .foregroundColor(position.type == .buy ? Color.Theme.buy : Color.Theme.sell)
                     .cornerRadius(.smallCornerRadius)
             }
             
@@ -330,7 +355,7 @@ struct RecentSignalsSection: View {
             
             VStack(spacing: 12) {
                 ForEach(0..<3) { _ in
-                    SignalRow()
+                    DashboardSignalRow()
                         .padding(.horizontal)
                 }
             }
@@ -338,7 +363,7 @@ struct RecentSignalsSection: View {
     }
 }
 
-struct SignalRow: View {
+struct DashboardSignalRow: View {
     var body: some View {
         HStack(spacing: 16) {
             // Signal type indicator

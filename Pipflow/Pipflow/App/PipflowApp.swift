@@ -32,17 +32,17 @@ struct RootView: View {
         Group {
             if isAuthenticated {
                 ContentView()
+                    .environmentObject(authService)
             } else if hasSeenOnboarding {
                 AuthenticationView()
             } else {
                 OnboardingView()
             }
         }
-        .onReceive(authService.isAuthenticated) { authenticated in
-            // Commented out for demo - keeping isAuthenticated = true
-            // withAnimation(.easeInOut(duration: 0.5)) {
-            //     isAuthenticated = authenticated
-            // }
+        .onReceive(authService.$isAuthenticated) { authenticated in
+            withAnimation(.easeInOut(duration: 0.5)) {
+                isAuthenticated = authenticated
+            }
         }
         .onAppear {
             // Check if user has seen onboarding

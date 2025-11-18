@@ -2,44 +2,40 @@
 //  PositionsView.swift
 //  Pipflow
 //
-//  Created by Claude on 19/07/2025.
+//  Real-time positions dashboard with live P&L tracking
 //
 
 import SwiftUI
+import Combine
 
 struct PositionsView: View {
-    @StateObject private var tradingService = TradingService.shared
-    @StateObject private var marketDataService = MarketDataService.shared
-    @EnvironmentObject var themeManager: ThemeManager
-    @State private var selectedPosition: Position?
-    @State private var showingPositionDetail = false
-    @State private var refreshTimer: Timer?
+    @StateObject private var trackingService = PositionTrackingService.shared
+    @StateObject private var webSocketService = MetaAPIWebSocketService.shared
+    @State private var selectedFilter: PositionFilter = .all
+    @State private var showingPositionDetail: TrackedPosition?
+    @State private var animateValues = false
     
     var body: some View {
         NavigationView {
             ZStack {
-                themeManager.currentTheme.backgroundColor
+                // Background
+                Color.Theme.background
                     .ignoresSafeArea()
                 
-                if tradingService.openPositions.isEmpty {
-                    EmptyPositionsView()
+                if trackingService.trackedPositions.isEmpty {
+                    emptyStateView
                 } else {
                     ScrollView {
-                        VStack(spacing: 16) {
-                            // Account Summary
-                            PositionsAccountSummaryCard()
+                        VStack(spacing: 20) {
+                            // Summary Card
+                            PositionSummaryCard()
+                                .padding(.horizontal)
+                            
+                            // Filter Tabs
+                            filterTabs
                             
                             // Positions List
-                            VStack(spacing: 12) {
-                                ForEach(tradingService.openPositions) { position in
-                                    PositionRowView(position: position)
-                                        .onTapGesture {
-                                            selectedPosition = position
-                                            showingPositionDetail = true
-                                        }
-                                }
-                            }
-                            .padding(.horizontal)
+                            positionsList
                         }
                         .padding(.vertical)
                     }
@@ -49,599 +45,547 @@ struct PositionsView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(action: refreshPositions) {
-                        Image(systemName: "arrow.clockwise")
-                            .foregroundColor(themeManager.currentTheme.accentColor)
-                    }
+                    connectionStatusView
                 }
             }
-            .sheet(item: $selectedPosition) { position in
+            .sheet(item: $showingPositionDetail) { position in
                 PositionDetailView(position: position)
             }
-            .onAppear {
-                startAutoRefresh()
+        }
+        .onAppear {
+            withAnimation(.easeOut(duration: 0.5)) {
+                animateValues = true
             }
-            .onDisappear {
-                stopAutoRefresh()
-            }
         }
     }
     
-    private func refreshPositions() {
-        Task {
-            await tradingService.refreshAccountData()
-        }
-    }
+    // MARK: - Components
     
-    private func startAutoRefresh() {
-        refreshTimer = Timer.scheduledTimer(withTimeInterval: 5.0, repeats: true) { _ in
-            refreshPositions()
-        }
-    }
-    
-    private func stopAutoRefresh() {
-        refreshTimer?.invalidate()
-        refreshTimer = nil
-    }
-}
-
-// MARK: - Empty State
-
-struct EmptyPositionsView: View {
-    @EnvironmentObject var themeManager: ThemeManager
-    
-    var body: some View {
+    var emptyStateView: some View {
         VStack(spacing: 24) {
-            Image(systemName: "chart.line.uptrend.xyaxis.circle")
-                .font(.system(size: 80))
-                .foregroundColor(themeManager.currentTheme.secondaryTextColor.opacity(0.5))
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 60))
+                .foregroundColor(Color.Theme.secondaryText.opacity(0.3))
             
-            VStack(spacing: 12) {
+            VStack(spacing: 8) {
                 Text("No Open Positions")
-                    .font(.title2)
-                    .fontWeight(.bold)
-                    .foregroundColor(themeManager.currentTheme.textColor)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .foregroundColor(Color.Theme.text)
                 
-                Text("Your open trades will appear here")
+                Text("Your active trades will appear here")
                     .font(.body)
-                    .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    .multilineTextAlignment(.center)
+                    .foregroundColor(Color.Theme.secondaryText)
             }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+    
+    var filterTabs: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(PositionFilter.allCases, id: \.self) { filter in
+                    FilterTab(
+                        title: filter.title,
+                        count: countForFilter(filter),
+                        isSelected: selectedFilter == filter,
+                        action: { selectedFilter = filter }
+                    )
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+    
+    var positionsList: some View {
+        VStack(spacing: 12) {
+            ForEach(filteredPositions) { position in
+                EnhancedPositionRow(position: position, animateValues: animateValues)
+                    .onTapGesture {
+                        showingPositionDetail = position
+                    }
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+    var connectionStatusView: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(webSocketService.connectionState == .connected ? Color.green : Color.red)
+                .frame(width: 8, height: 8)
+            
+            Text(webSocketService.connectionState == .connected ? "Live" : "Offline")
+                .font(.caption)
+                .foregroundColor(Color.Theme.secondaryText)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.Theme.cardBackground)
+        .cornerRadius(20)
+    }
+    
+    // MARK: - Helpers
+    
+    var filteredPositions: [TrackedPosition] {
+        switch selectedFilter {
+        case .all:
+            return trackingService.trackedPositions
+        case .profitable:
+            return trackingService.trackedPositions.filter { $0.netPL > 0 }
+        case .losing:
+            return trackingService.trackedPositions.filter { $0.netPL < 0 }
+        case .buy:
+            return trackingService.trackedPositions.filter { $0.type == .buy }
+        case .sell:
+            return trackingService.trackedPositions.filter { $0.type == .sell }
+        }
+    }
+    
+    func countForFilter(_ filter: PositionFilter) -> Int {
+        switch filter {
+        case .all:
+            return trackingService.trackedPositions.count
+        case .profitable:
+            return trackingService.trackedPositions.filter { $0.netPL > 0 }.count
+        case .losing:
+            return trackingService.trackedPositions.filter { $0.netPL < 0 }.count
+        case .buy:
+            return trackingService.trackedPositions.filter { $0.type == .buy }.count
+        case .sell:
+            return trackingService.trackedPositions.filter { $0.type == .sell }.count
         }
     }
 }
 
-// MARK: - Account Summary Card
+// MARK: - Position Filter
 
-struct PositionsAccountSummaryCard: View {
-    @StateObject private var tradingService = TradingService.shared
-    @EnvironmentObject var themeManager: ThemeManager
+enum PositionFilter: String, CaseIterable {
+    case all = "All"
+    case profitable = "Profit"
+    case losing = "Loss"
+    case buy = "Buy"
+    case sell = "Sell"
     
-    var totalProfit: Double {
-        tradingService.openPositions.reduce(0) { $0 + $1.profit }
+    var title: String {
+        rawValue
     }
+}
+
+// MARK: - Filter Tab
+
+struct FilterTab: View {
+    let title: String
+    let count: Int
+    let isSelected: Bool
+    let action: () -> Void
     
     var body: some View {
-        VStack(spacing: 16) {
-            HStack {
-                Text("Account Summary")
-                    .font(.headline)
-                    .foregroundColor(themeManager.currentTheme.textColor)
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text(title)
+                    .font(.subheadline)
+                    .fontWeight(isSelected ? .semibold : .regular)
                 
-                Spacer()
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule()
+                                .fill(isSelected ? Color.black.opacity(0.2) : Color.white.opacity(0.2))
+                        )
+                }
+            }
+            .foregroundColor(isSelected ? Color.Theme.accent : Color.Theme.text)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(isSelected ? Color.Theme.accent.opacity(0.2) : Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(isSelected ? Color.Theme.accent : Color.Theme.secondaryText.opacity(0.3), lineWidth: 1)
+                    )
+            )
+        }
+    }
+}
+
+// MARK: - Enhanced Position Row
+
+struct EnhancedPositionRow: View {
+    let position: TrackedPosition
+    let animateValues: Bool
+    @State private var previousPL: Double = 0
+    
+    var body: some View {
+        HStack(spacing: 16) {
+            // Symbol and Type
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 8) {
+                    Text(position.symbol)
+                        .font(.bodyLarge)
+                        .fontWeight(.semibold)
+                        .foregroundColor(Color.Theme.text)
+                    
+                    TypeBadge(type: position.type)
+                }
                 
-                if tradingService.activeAccount != nil {
+                HStack(spacing: 12) {
                     HStack(spacing: 4) {
-                        Circle()
-                            .fill(Color.Theme.success)
-                            .frame(width: 8, height: 8)
-                        Text("Connected")
+                        Text("Vol:")
                             .font(.caption)
-                            .foregroundColor(Color.Theme.success)
+                            .foregroundColor(Color.Theme.secondaryText)
+                        Text(String(format: "%.2f", position.volume))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(Color.Theme.text)
+                    }
+                    
+                    HStack(spacing: 4) {
+                        Text("Open:")
+                            .font(.caption)
+                            .foregroundColor(Color.Theme.secondaryText)
+                        Text(String(format: "%.5f", position.openPrice))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(Color.Theme.text)
                     }
                 }
             }
             
-            HStack(spacing: 20) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Balance")
-                        .font(.caption)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    Text(String(format: "$%.2f", tradingService.accountBalance))
-                        .font(.subheadline)
+            Spacer()
+            
+            // P&L and Pips
+            VStack(alignment: .trailing, spacing: 4) {
+                // P&L with animation
+                HStack(spacing: 4) {
+                    if position.netPL != previousPL && animateValues {
+                        Image(systemName: position.netPL > previousPL ? "arrow.up" : "arrow.down")
+                            .font(.system(size: 10))
+                            .foregroundColor(position.netPL > previousPL ? Color.Theme.success : Color.Theme.error)
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    
+                    Text(formatCurrency(position.netPL))
+                        .font(.bodyLarge)
                         .fontWeight(.semibold)
-                        .foregroundColor(themeManager.currentTheme.textColor)
+                        .foregroundColor(position.netPL >= 0 ? Color.Theme.success : Color.Theme.error)
+                        .animation(.easeInOut(duration: 0.3), value: position.netPL)
                 }
                 
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Equity")
+                HStack(spacing: 8) {
+                    // Percentage
+                    Text(String(format: "%.2f%%", position.unrealizedPLPercent))
                         .font(.caption)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    Text(String(format: "$%.2f", tradingService.accountEquity))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(themeManager.currentTheme.textColor)
+                        .foregroundColor(position.netPL >= 0 ? Color.Theme.success : Color.Theme.error)
+                    
+                    // Pips
+                    HStack(spacing: 2) {
+                        Text(String(format: "%.1f", abs(position.pipsProfit)))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Text("pips")
+                            .font(.caption)
+                    }
+                    .foregroundColor(Color.Theme.secondaryText)
                 }
-                
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Floating P/L")
-                        .font(.caption)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    Text(String(format: "%+.2f", totalProfit))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(totalProfit >= 0 ? Color.Theme.success : Color.Theme.error)
-                }
-                
-                Spacer()
             }
         }
         .padding()
-        .background(themeManager.currentTheme.secondaryBackgroundColor)
-        .cornerRadius(16)
-        .padding(.horizontal)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.Theme.cardBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(Color.Theme.secondaryText.opacity(0.1), lineWidth: 1)
+                )
+        )
+        .onAppear {
+            previousPL = position.netPL
+        }
+        .onChange(of: position.netPL) { oldValue, newValue in
+            previousPL = oldValue
+        }
+    }
+    
+    private func formatCurrency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: value)) ?? "$0.00"
     }
 }
 
-// MARK: - Position Row
+// MARK: - Type Badge
 
-struct PositionRowView: View {
-    let position: Position
-    @StateObject private var marketDataService = MarketDataService.shared
-    @EnvironmentObject var themeManager: ThemeManager
-    
-    var currentPrice: Double {
-        if let quote = marketDataService.quotes[position.symbol] {
-            return quote.mid
-        }
-        return position.currentPrice
-    }
-    
-    var profit: Double {
-        let price = currentPrice
-        if position.side == .buy {
-            return (price - position.openPrice) * position.volume * 100000 // Assuming standard lot size
-        } else {
-            return (position.openPrice - price) * position.volume * 100000
-        }
-    }
+struct TypeBadge: View {
+    let type: TrackedPosition.PositionType
     
     var body: some View {
-        VStack(spacing: 0) {
-            // Main Content
-            HStack {
-                // Symbol and Side
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(position.symbol)
-                            .font(.headline)
-                            .foregroundColor(themeManager.currentTheme.textColor)
-                        
-                        Text(position.side.rawValue.uppercased())
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(position.side == .buy ? Color.Theme.buy : Color.Theme.sell)
-                            .foregroundColor(.white)
-                            .cornerRadius(4)
-                    }
-                    
-                    Text("\(String(format: "%.2f", position.volume)) lots")
-                        .font(.caption)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                }
-                
-                Spacer()
-                
-                // Prices
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(String(format: "%.5f", currentPrice))
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .foregroundColor(themeManager.currentTheme.textColor)
-                    
-                    Text("Open: \(String(format: "%.5f", position.openPrice))")
-                        .font(.caption2)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                }
-                
-                // Profit/Loss
-                VStack(alignment: .trailing, spacing: 4) {
-                    Text(String(format: "%+.2f", profit))
-                        .font(.headline)
-                        .foregroundColor(profit >= 0 ? Color.Theme.success : Color.Theme.error)
-                    
-                    Text("\(String(format: "%+.2f%%", (profit / (position.openPrice * position.volume * 100000)) * 100))")
-                        .font(.caption)
-                        .foregroundColor(profit >= 0 ? Color.Theme.success : Color.Theme.error)
-                }
-            }
-            .padding()
-            
-            // SL/TP Bar
-            if position.stopLoss != nil || position.takeProfit != nil {
-                Divider()
-                    .background(themeManager.currentTheme.separatorColor)
-                
-                HStack {
-                    if let sl = position.stopLoss {
-                        HStack(spacing: 4) {
-                            Text("SL:")
-                                .font(.caption2)
-                                .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                            Text(String(format: "%.5f", sl))
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(Color.Theme.error)
-                        }
-                    }
-                    
-                    if position.stopLoss != nil && position.takeProfit != nil {
-                        Text("•")
-                            .foregroundColor(themeManager.currentTheme.separatorColor)
-                    }
-                    
-                    if let tp = position.takeProfit {
-                        HStack(spacing: 4) {
-                            Text("TP:")
-                                .font(.caption2)
-                                .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                            Text(String(format: "%.5f", tp))
-                                .font(.caption2)
-                                .fontWeight(.semibold)
-                                .foregroundColor(Color.Theme.success)
-                        }
-                    }
-                    
-                    Spacer()
-                    
-                    // Time Open
-                    Text(timeAgo(from: position.openTime))
-                        .font(.caption2)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 8)
-            }
-        }
-        .background(themeManager.currentTheme.secondaryBackgroundColor)
-        .cornerRadius(12)
-    }
-    
-    private func timeAgo(from date: Date) -> String {
-        let interval = Date().timeIntervalSince(date)
-        
-        if interval < 60 {
-            return "Just now"
-        } else if interval < 3600 {
-            return "\(Int(interval / 60))m"
-        } else if interval < 86400 {
-            return "\(Int(interval / 3600))h"
-        } else {
-            return "\(Int(interval / 86400))d"
-        }
+        Text(type == .buy ? "BUY" : "SELL")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(type == .buy ? Color.Theme.success : Color.Theme.error)
+            )
     }
 }
 
 // MARK: - Position Detail View
 
 struct PositionDetailView: View {
-    let position: Position
-    @StateObject private var tradingService = TradingService.shared
-    @EnvironmentObject var themeManager: ThemeManager
-    @Environment(\.dismiss) var dismiss
-    
-    @State private var showingModifySheet = false
+    let position: TrackedPosition
+    @Environment(\.dismiss) private var dismiss
+    @State private var showingModifyView = false
     @State private var showingCloseConfirmation = false
-    @State private var isClosing = false
     
     var body: some View {
         NavigationView {
-            ZStack {
-                themeManager.currentTheme.backgroundColor
-                    .ignoresSafeArea()
-                
-                ScrollView {
-                    VStack(spacing: 20) {
-                        // Position Header
-                        PositionHeaderView(position: position)
-                        
-                        // Quick Actions
-                        HStack(spacing: 12) {
-                            Button(action: {
-                                showingModifySheet = true
-                            }) {
-                                Label("Modify", systemImage: "slider.horizontal.3")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.Theme.accent)
-                                    .cornerRadius(12)
-                            }
-                            
-                            Button(action: {
-                                showingCloseConfirmation = true
-                            }) {
-                                Label("Close", systemImage: "xmark.circle.fill")
-                                    .font(.subheadline)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .padding()
-                                    .background(Color.Theme.error)
-                                    .cornerRadius(12)
-                            }
-                        }
-                        .padding(.horizontal)
-                        
-                        // Position Details
-                        PositionDetailsCard(position: position)
-                        
-                        // Price Levels
-                        PriceLevelsCard(position: position)
-                        
-                        // Trade Info
-                        TradeInfoCard(position: position)
-                    }
-                    .padding(.vertical)
+            ScrollView {
+                VStack(spacing: 24) {
+                    // Header with current P&L
+                    headerSection
+                    
+                    // Position Details
+                    detailsSection
+                    
+                    // Risk Management
+                    riskSection
+                    
+                    // Performance Metrics
+                    performanceSection
+                    
+                    // Action Buttons
+                    actionButtons
                 }
+                .padding()
             }
-            .navigationTitle("Position Details")
-            .navigationBarTitleDisplayMode(.inline)
+            .background(Color.Theme.background)
+            .navigationTitle(position.symbol)
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
-                    .foregroundColor(themeManager.currentTheme.accentColor)
                 }
             }
-            .sheet(isPresented: $showingModifySheet) {
-                ModifyPositionView(position: position)
-            }
-            .alert("Close Position", isPresented: $showingCloseConfirmation) {
-                Button("Cancel", role: .cancel) {}
-                Button("Close", role: .destructive) {
-                    closePosition()
-                }
-            } message: {
-                Text("Are you sure you want to close this position?")
-            }
         }
     }
     
-    private func closePosition() {
-        isClosing = true
-        Task {
-            do {
-                try await tradingService.closePosition(position)
-                dismiss()
-            } catch {
-                // Handle error
-                isClosing = false
-            }
-        }
-    }
-}
-
-// MARK: - Position Header
-
-struct PositionHeaderView: View {
-    let position: Position
-    @StateObject private var marketDataService = MarketDataService.shared
-    @EnvironmentObject var themeManager: ThemeManager
-    
-    var currentPrice: Double {
-        if let quote = marketDataService.quotes[position.symbol] {
-            return quote.mid
-        }
-        return position.currentPrice
-    }
-    
-    var profit: Double {
-        let price = currentPrice
-        if position.side == .buy {
-            return (price - position.openPrice) * position.volume * 100000
-        } else {
-            return (position.openPrice - price) * position.volume * 100000
-        }
-    }
-    
-    var body: some View {
+    var headerSection: some View {
         VStack(spacing: 16) {
-            // Symbol and Side
-            HStack {
-                Text(position.symbol)
+            // Current P&L
+            VStack(spacing: 8) {
+                Text("Net P&L")
+                    .font(.subheadline)
+                    .foregroundColor(Color.Theme.secondaryText)
+                
+                Text(formatCurrency(position.netPL))
                     .font(.largeTitle)
                     .fontWeight(.bold)
-                    .foregroundColor(themeManager.currentTheme.textColor)
+                    .foregroundColor(position.netPL >= 0 ? Color.Theme.success : Color.Theme.error)
                 
-                Text(position.side.rawValue.uppercased())
-                    .font(.caption)
-                    .fontWeight(.bold)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(position.side == .buy ? Color.Theme.buy : Color.Theme.sell)
-                    .foregroundColor(.white)
-                    .cornerRadius(8)
-            }
-            
-            // Profit/Loss
-            VStack(spacing: 8) {
-                Text(String(format: "%+.2f USD", profit))
-                    .font(.title)
-                    .fontWeight(.bold)
-                    .foregroundColor(profit >= 0 ? Color.Theme.success : Color.Theme.error)
-                
-                Text(String(format: "%+.2f%%", (profit / (position.openPrice * position.volume * 100000)) * 100))
-                    .font(.headline)
-                    .foregroundColor(profit >= 0 ? Color.Theme.success : Color.Theme.error)
+                HStack(spacing: 16) {
+                    Label(String(format: "%.2f%%", position.unrealizedPLPercent), systemImage: "percent")
+                    Label(String(format: "%.1f pips", position.pipsProfit), systemImage: "chart.line.uptrend.xyaxis")
+                }
+                .font(.caption)
+                .foregroundColor(Color.Theme.secondaryText)
             }
             
             // Current Price
-            HStack(spacing: 16) {
-                VStack(spacing: 4) {
-                    Text("Current")
+            HStack(spacing: 24) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Bid")
                         .font(.caption)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    Text(String(format: "%.5f", currentPrice))
-                        .font(.headline)
-                        .foregroundColor(themeManager.currentTheme.textColor)
+                        .foregroundColor(Color.Theme.secondaryText)
+                    Text(String(format: "%.5f", position.bid))
+                        .font(.bodyMedium)
+                        .fontWeight(.semibold)
                 }
                 
-                Image(systemName: position.side == .buy ? "arrow.up.circle.fill" : "arrow.down.circle.fill")
-                    .font(.title2)
-                    .foregroundColor(position.side == .buy ? Color.Theme.buy : Color.Theme.sell)
-                
-                VStack(spacing: 4) {
-                    Text("Open")
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Ask")
                         .font(.caption)
-                        .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    Text(String(format: "%.5f", position.openPrice))
-                        .font(.headline)
-                        .foregroundColor(themeManager.currentTheme.textColor)
+                        .foregroundColor(Color.Theme.secondaryText)
+                    Text(String(format: "%.5f", position.ask))
+                        .font(.bodyMedium)
+                        .fontWeight(.semibold)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Spread")
+                        .font(.caption)
+                        .foregroundColor(Color.Theme.secondaryText)
+                    Text(String(format: "%.1f", position.spread * 10000))
+                        .font(.bodyMedium)
+                        .fontWeight(.semibold)
                 }
             }
+            .padding()
+            .background(Color.Theme.cardBackground)
+            .cornerRadius(8)
         }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(themeManager.currentTheme.secondaryBackgroundColor)
-        .cornerRadius(16)
-        .padding(.horizontal)
     }
-}
-
-// MARK: - Position Details Card
-
-struct PositionDetailsCard: View {
-    let position: Position
-    @EnvironmentObject var themeManager: ThemeManager
     
-    var body: some View {
+    var detailsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Position Details")
                 .font(.headline)
-                .foregroundColor(themeManager.currentTheme.textColor)
             
-            VStack(spacing: 12) {
-                DetailRow(label: "Volume", value: String(format: "%.2f lots", position.volume))
-                DetailRow(label: "Commission", value: String(format: "$%.2f", position.commission))
-                DetailRow(label: "Swap", value: String(format: "$%.2f", position.swap))
-                DetailRow(label: "Net Profit", value: String(format: "$%.2f", position.netProfit), color: position.netProfit >= 0 ? Color.Theme.success : Color.Theme.error)
-            }
-        }
-        .padding()
-        .background(themeManager.currentTheme.secondaryBackgroundColor)
-        .cornerRadius(16)
-        .padding(.horizontal)
-    }
-}
-
-// MARK: - Price Levels Card
-
-struct PriceLevelsCard: View {
-    let position: Position
-    @EnvironmentObject var themeManager: ThemeManager
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("Price Levels")
-                .font(.headline)
-                .foregroundColor(themeManager.currentTheme.textColor)
-            
-            VStack(spacing: 12) {
-                if let sl = position.stopLoss {
-                    HStack {
-                        Label("Stop Loss", systemImage: "shield.fill")
-                            .font(.subheadline)
-                            .foregroundColor(Color.Theme.error)
-                        
-                        Spacer()
-                        
-                        Text(String(format: "%.5f", sl))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(themeManager.currentTheme.textColor)
-                    }
-                } else {
-                    HStack {
-                        Label("Stop Loss", systemImage: "shield")
-                            .font(.subheadline)
-                            .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                        
-                        Spacer()
-                        
-                        Text("Not Set")
-                            .font(.subheadline)
-                            .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    }
+            VStack(spacing: 0) {
+                PositionDetailRow(label: "Type", value: position.type == .buy ? "Buy" : "Sell")
+                PositionDetailRow(label: "Volume", value: String(format: "%.2f lots", position.volume))
+                PositionDetailRow(label: "Open Price", value: String(format: "%.5f", position.openPrice))
+                PositionDetailRow(label: "Open Time", value: formatDate(position.openTime))
+                PositionDetailRow(label: "Duration", value: "\(position.durationInMinutes) min")
+                
+                if let comment = position.comment, !comment.isEmpty {
+                    PositionDetailRow(label: "Comment", value: comment)
                 }
                 
-                if let tp = position.takeProfit {
-                    HStack {
-                        Label("Take Profit", systemImage: "target")
-                            .font(.subheadline)
-                            .foregroundColor(Color.Theme.success)
-                        
-                        Spacer()
-                        
-                        Text(String(format: "%.5f", tp))
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(themeManager.currentTheme.textColor)
-                    }
-                } else {
-                    HStack {
-                        Label("Take Profit", systemImage: "target")
-                            .font(.subheadline)
-                            .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                        
-                        Spacer()
-                        
-                        Text("Not Set")
-                            .font(.subheadline)
-                            .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    }
+                if let magic = position.magic {
+                    PositionDetailRow(label: "Magic", value: String(magic))
                 }
             }
+            .background(Color.Theme.cardBackground)
+            .cornerRadius(8)
         }
-        .padding()
-        .background(themeManager.currentTheme.secondaryBackgroundColor)
-        .cornerRadius(16)
-        .padding(.horizontal)
     }
-}
-
-// MARK: - Trade Info Card
-
-struct TradeInfoCard: View {
-    let position: Position
-    @EnvironmentObject var themeManager: ThemeManager
     
-    var body: some View {
+    var riskSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Trade Information")
+            Text("Risk Management")
                 .font(.headline)
-                .foregroundColor(themeManager.currentTheme.textColor)
             
             VStack(spacing: 12) {
-                DetailRow(label: "Position ID", value: position.id)
-                DetailRow(label: "Open Time", value: formatDate(position.openTime))
-                if let magic = position.magicNumber {
-                    DetailRow(label: "Magic Number", value: String(magic))
-                }
-                if let comment = position.comment {
-                    DetailRow(label: "Comment", value: comment)
+                // Stop Loss
+                RiskLevelCard(
+                    title: "Stop Loss",
+                    price: position.stopLoss,
+                    pips: position.stopLoss.map { sl in
+                        abs((position.type == .buy ? position.openPrice - sl : sl - position.openPrice) * 10000)
+                    },
+                    isProfit: false
+                )
+                
+                // Take Profit
+                RiskLevelCard(
+                    title: "Take Profit",
+                    price: position.takeProfit,
+                    pips: position.takeProfit.map { tp in
+                        abs((position.type == .buy ? tp - position.openPrice : position.openPrice - tp) * 10000)
+                    },
+                    isProfit: true
+                )
+                
+                // Risk/Reward Ratio
+                if let ratio = position.riskRewardRatio {
+                    HStack {
+                        Label("Risk/Reward Ratio", systemImage: "chart.xyaxis.line")
+                            .font(.subheadline)
+                            .foregroundColor(Color.Theme.secondaryText)
+                        
+                        Spacer()
+                        
+                        Text(String(format: "1:%.2f", ratio))
+                            .font(.bodyMedium)
+                            .fontWeight(.semibold)
+                            .foregroundColor(ratio >= 2 ? Color.Theme.success : Color.Theme.warning)
+                    }
+                    .padding()
+                    .background(Color.Theme.cardBackground)
+                    .cornerRadius(8)
                 }
             }
         }
-        .padding()
-        .background(themeManager.currentTheme.secondaryBackgroundColor)
-        .cornerRadius(16)
-        .padding(.horizontal)
+    }
+    
+    var performanceSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Performance")
+                .font(.headline)
+            
+            HStack(spacing: 16) {
+                PositionMetricCard(
+                    title: "Max Profit",
+                    value: formatCurrency(position.maxProfit),
+                    color: Color.Theme.success
+                )
+                
+                PositionMetricCard(
+                    title: "Max Loss",
+                    value: formatCurrency(position.maxLoss),
+                    color: Color.Theme.error
+                )
+            }
+            
+            HStack(spacing: 16) {
+                PositionMetricCard(
+                    title: "Commission",
+                    value: formatCurrency(position.commission),
+                    color: Color.Theme.secondaryText
+                )
+                
+                PositionMetricCard(
+                    title: "Swap",
+                    value: formatCurrency(position.swap),
+                    color: Color.Theme.secondaryText
+                )
+            }
+        }
+    }
+    
+    var actionButtons: some View {
+        HStack(spacing: 16) {
+            Button(action: { showingModifyView = true }) {
+                Label("Modify", systemImage: "slider.horizontal.3")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.Theme.accent.opacity(0.2))
+                    .foregroundColor(Color.Theme.accent)
+                    .cornerRadius(8)
+            }
+            
+            Button(action: { showingCloseConfirmation = true }) {
+                Label("Close", systemImage: "xmark.circle")
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(Color.Theme.error.opacity(0.2))
+                    .foregroundColor(Color.Theme.error)
+                    .cornerRadius(8)
+            }
+        }
+        .alert("Close Position", isPresented: $showingCloseConfirmation) {
+            Button("Cancel", role: .cancel) { }
+            Button("Close", role: .destructive) {
+                // Close position
+                dismiss()
+            }
+        } message: {
+            Text("Are you sure you want to close this position?\n\nCurrent P&L: \(formatCurrency(position.netPL))")
+        }
+    }
+    
+    private func formatCurrency(_ value: Double) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.currencySymbol = "$"
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: NSNumber(value: value)) ?? "$0.00"
     }
     
     private func formatDate(_ date: Date) -> String {
@@ -652,173 +596,91 @@ struct TradeInfoCard: View {
     }
 }
 
-// MARK: - Helper Views
+// MARK: - Helper Components
 
-struct DetailRow: View {
+struct PositionDetailRow: View {
     let label: String
     let value: String
-    var color: Color?
-    @EnvironmentObject var themeManager: ThemeManager
     
     var body: some View {
         HStack {
             Text(label)
                 .font(.subheadline)
-                .foregroundColor(themeManager.currentTheme.secondaryTextColor)
+                .foregroundColor(Color.Theme.secondaryText)
             
             Spacer()
             
             Text(value)
                 .font(.subheadline)
-                .fontWeight(.semibold)
-                .foregroundColor(color ?? themeManager.currentTheme.textColor)
+                .fontWeight(.medium)
+                .foregroundColor(Color.Theme.text)
         }
+        .padding()
     }
 }
 
-// MARK: - Modify Position View
-
-struct ModifyPositionView: View {
-    let position: Position
-    @StateObject private var tradingService = TradingService.shared
-    @EnvironmentObject var themeManager: ThemeManager
-    @Environment(\.dismiss) var dismiss
-    
-    @State private var stopLoss: String = ""
-    @State private var takeProfit: String = ""
-    @State private var isModifying = false
+struct RiskLevelCard: View {
+    let title: String
+    let price: Double?
+    let pips: Double?
+    let isProfit: Bool
     
     var body: some View {
-        NavigationView {
-            ZStack {
-                themeManager.currentTheme.backgroundColor
-                    .ignoresSafeArea()
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundColor(Color.Theme.secondaryText)
                 
-                VStack(spacing: 24) {
-                    // Position Info
-                    HStack {
-                        Text(position.symbol)
-                            .font(.title2)
-                            .fontWeight(.bold)
-                            .foregroundColor(themeManager.currentTheme.textColor)
-                        
-                        Text(position.side.rawValue.uppercased())
-                            .font(.caption)
-                            .fontWeight(.bold)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(position.side == .buy ? Color.Theme.buy : Color.Theme.sell)
-                            .foregroundColor(.white)
-                            .cornerRadius(4)
-                        
-                        Spacer()
-                    }
-                    .padding(.horizontal)
-                    
-                    // Stop Loss
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Stop Loss")
-                            .font(.headline)
-                            .foregroundColor(themeManager.currentTheme.textColor)
-                        
-                        TextField("Enter stop loss price", text: $stopLoss)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .keyboardType(.decimalPad)
-                        
-                        Text("Current: \(position.stopLoss != nil ? String(format: "%.5f", position.stopLoss!) : "Not Set")")
-                            .font(.caption)
-                            .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    }
-                    .padding(.horizontal)
-                    
-                    // Take Profit
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("Take Profit")
-                            .font(.headline)
-                            .foregroundColor(themeManager.currentTheme.textColor)
-                        
-                        TextField("Enter take profit price", text: $takeProfit)
-                            .textFieldStyle(RoundedBorderTextFieldStyle())
-                            .keyboardType(.decimalPad)
-                        
-                        Text("Current: \(position.takeProfit != nil ? String(format: "%.5f", position.takeProfit!) : "Not Set")")
-                            .font(.caption)
-                            .foregroundColor(themeManager.currentTheme.secondaryTextColor)
-                    }
-                    .padding(.horizontal)
-                    
-                    Spacer()
-                    
-                    // Modify Button
-                    Button(action: modifyPosition) {
-                        HStack {
-                            if isModifying {
-                                ProgressView()
-                                    .progressViewStyle(CircularProgressViewStyle(tint: .white))
-                                    .scaleEffect(0.8)
-                            } else {
-                                Image(systemName: "checkmark.circle.fill")
-                            }
-                            Text(isModifying ? "Modifying..." : "Modify Position")
-                        }
-                        .font(.headline)
-                        .foregroundColor(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(
-                            LinearGradient(
-                                colors: [Color.Theme.gradientStart, Color.Theme.gradientEnd],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .cornerRadius(12)
-                        .disabled(isModifying)
-                    }
-                    .padding(.horizontal)
-                }
-                .padding(.vertical)
-            }
-            .navigationTitle("Modify Position")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") {
-                        dismiss()
-                    }
-                    .foregroundColor(themeManager.currentTheme.accentColor)
+                if let price = price {
+                    Text(String(format: "%.5f", price))
+                        .font(.bodyMedium)
+                        .fontWeight(.semibold)
+                } else {
+                    Text("Not Set")
+                        .font(.bodyMedium)
+                        .foregroundColor(Color.Theme.secondaryText)
                 }
             }
-            .onAppear {
-                if let sl = position.stopLoss {
-                    stopLoss = String(format: "%.5f", sl)
-                }
-                if let tp = position.takeProfit {
-                    takeProfit = String(format: "%.5f", tp)
-                }
+            
+            Spacer()
+            
+            if let pips = pips {
+                Text(String(format: "%.1f pips", pips))
+                    .font(.caption)
+                    .fontWeight(.medium)
+                    .foregroundColor(isProfit ? Color.Theme.success : Color.Theme.error)
             }
         }
+        .padding()
+        .background(Color.Theme.cardBackground)
+        .cornerRadius(8)
     }
+}
+
+struct PositionMetricCard: View {
+    let title: String
+    let value: String
+    let color: Color
     
-    private func modifyPosition() {
-        isModifying = true
-        
-        let sl = stopLoss.isEmpty ? nil : Double(stopLoss)
-        let tp = takeProfit.isEmpty ? nil : Double(takeProfit)
-        
-        Task {
-            do {
-                try await tradingService.modifyPosition(position, stopLoss: sl, takeProfit: tp)
-                dismiss()
-            } catch {
-                // Handle error
-                isModifying = false
-            }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title)
+                .font(.caption)
+                .foregroundColor(Color.Theme.secondaryText)
+            
+            Text(value)
+                .font(.bodyMedium)
+                .fontWeight(.semibold)
+                .foregroundColor(color)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color.Theme.cardBackground)
+        .cornerRadius(8)
     }
 }
 
 #Preview {
     PositionsView()
-        .environmentObject(ThemeManager.shared)
 }

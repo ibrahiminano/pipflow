@@ -16,11 +16,13 @@ class DashboardViewModel: ObservableObject {
     @Published var recentSignals: [Signal] = []
     @Published var isLoading = false
     @Published var error: String?
+    @Published var chartData: [DashboardChartDataPoint] = []
     
     private var cancellables = Set<AnyCancellable>()
     
     init() {
         loadDashboardData()
+        generateChartData()
     }
     
     func loadDashboardData() {
@@ -36,4 +38,22 @@ class DashboardViewModel: ObservableObject {
     func refreshData() {
         loadDashboardData()
     }
+    
+    private func generateChartData() {
+        // Generate sample chart data
+        let now = Date()
+        chartData = (0..<50).map { index in
+            let time = now.addingTimeInterval(Double(index) * -3600) // Hourly data
+            let baseValue = 10000.0
+            let variation = Double.random(in: -200...300)
+            let value = baseValue + variation + (Double(index) * 50)
+            return DashboardChartDataPoint(id: UUID(), time: time, value: value)
+        }.reversed()
+    }
+}
+
+struct DashboardChartDataPoint: Identifiable {
+    let id: UUID
+    let time: Date
+    let value: Double
 }
